@@ -6,5 +6,6 @@
 
 pub mod caller;
 pub mod cli;
+pub mod indel;
 pub mod pileup;
 pub mod quality;
