@@ -10,4 +10,5 @@ pub mod filter;
 pub mod indel;
 pub mod pileup;
 pub mod quality;
+pub mod region;
 pub mod vcf;

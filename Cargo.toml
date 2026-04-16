@@ -25,6 +25,7 @@ noodles-bam = "0.88"
 noodles-sam = "0.84"
 noodles-fasta = "0.60"
 noodles-core = "0.19"
+rayon = "1.10"
 
 [dev-dependencies]
 
