@@ -6,3 +6,4 @@
 
 pub mod cli;
 pub mod pileup;
+pub mod quality;
