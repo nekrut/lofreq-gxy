@@ -28,6 +28,11 @@ noodles-core = "0.19"
 rayon = "1.10"
 
 [dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "hotpath"
+harness = false
 
 [profile.release]
 lto = "thin"
