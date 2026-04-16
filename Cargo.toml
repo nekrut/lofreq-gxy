@@ -1,0 +1,34 @@
+[package]
+name = "lofreq-gxy"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Rust rewrite of lofreq focused on haploid viral/bacterial variant calling"
+license = "MIT"
+repository = "https://github.com/nekrut/lofreq-gxy"
+readme = "PLAN.md"
+default-run = "lofreq-gxy"
+
+[[bin]]
+name = "lofreq-gxy"
+path = "src/main.rs"
+
+[lib]
+name = "lofreq_gxy"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
+anyhow = "1"
+thiserror = "2"
+
+[dev-dependencies]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = 1
+
+[profile.bench]
+lto = "thin"
+codegen-units = 1
