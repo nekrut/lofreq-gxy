@@ -4,6 +4,7 @@
 //! tests can share the same building blocks. Modules are fleshed out
 //! incrementally; see `PLAN.md` for the roadmap.
 
+pub mod caller;
 pub mod cli;
 pub mod pileup;
 pub mod quality;
