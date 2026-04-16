@@ -5,3 +5,4 @@
 //! incrementally; see `PLAN.md` for the roadmap.
 
 pub mod cli;
+pub mod pileup;
