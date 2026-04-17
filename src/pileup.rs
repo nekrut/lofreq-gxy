@@ -295,9 +295,8 @@ where
 // ---------------------------------------------------------------------------
 // noodles-bam adapter.
 //
-// Kept thin: one public function that reads all records overlapping a region
-// and feeds them into the builder. Streaming across the whole genome is
-// implemented at the region.rs layer where we shard by 50kb windows.
+// Kept thin: one public function per conversion. Streaming across the whole
+// genome is implemented at the region.rs layer where we shard by 50kb windows.
 // ---------------------------------------------------------------------------
 
 /// Errors surfaced by the BAM pileup adapter.
@@ -307,6 +306,127 @@ pub enum PileupError {
     Io(#[from] std::io::Error),
     #[error("reference sequence `{0}` not found in BAM header")]
     ChromNotFound(String),
+}
+
+/// Convert a noodles-sam CIGAR kind to our local enum.
+///
+/// `=` / `X` (sequence match / mismatch) both map to `Match` — for pileup
+/// purposes they're identical, and collapsing them keeps downstream code
+/// branching on four ops instead of six.
+fn cigar_kind_to_op(kind: noodles_sam::alignment::record::cigar::op::Kind) -> CigarOp {
+    use noodles_sam::alignment::record::cigar::op::Kind as K;
+    match kind {
+        K::Match | K::SequenceMatch | K::SequenceMismatch => CigarOp::Match,
+        K::Insertion => CigarOp::Insert,
+        K::Deletion => CigarOp::Delete,
+        K::Skip => CigarOp::RefSkip,
+        K::SoftClip => CigarOp::SoftClip,
+        K::HardClip | K::Pad => CigarOp::Pad,
+    }
+}
+
+/// Turn one `noodles_bam::Record` into our BAM-agnostic [`AlignedRead`].
+///
+/// Returns `Ok(None)` for records that are unmapped, secondary, or
+/// supplementary — the lofreq SNV pileup only considers primary alignments
+/// and upstream does the same. QC-fail and duplicate records are also
+/// filtered here (matching `lofreq_call.c` defaults).
+pub fn record_to_aligned_read(
+    record: &noodles_bam::Record,
+) -> std::io::Result<Option<AlignedRead>> {
+    use noodles_sam::alignment::record::Flags;
+
+    let flags = record.flags();
+    // Bitflags from noodles-sam's `Flags` type; test the raw bits so the
+    // same check works across upstream reorderings.
+    let bits = flags.bits();
+    let unmapped = (bits & Flags::UNMAPPED.bits()) != 0;
+    let secondary = (bits & Flags::SECONDARY.bits()) != 0;
+    let supplementary = (bits & Flags::SUPPLEMENTARY.bits()) != 0;
+    let qc_fail = (bits & Flags::QC_FAIL.bits()) != 0;
+    let duplicate = (bits & Flags::DUPLICATE.bits()) != 0;
+    if unmapped || secondary || supplementary || qc_fail || duplicate {
+        return Ok(None);
+    }
+
+    let chrom_id = match record.reference_sequence_id() {
+        Some(res) => res?,
+        None => return Ok(None),
+    };
+    let ref_start = match record.alignment_start() {
+        Some(res) => {
+            let pos = res?;
+            // `Position` is 1-based; we store 0-based internally.
+            (usize::from(pos) - 1) as u32
+        }
+        None => return Ok(None),
+    };
+    let mapping_quality = record
+        .mapping_quality()
+        .map(u8::from)
+        .unwrap_or(255);
+    let is_reverse = (bits & Flags::REVERSE_COMPLEMENTED.bits()) != 0;
+
+    // Sequence iterator yields decoded ASCII bytes (A/C/G/T/N/...).
+    let sequence: Vec<u8> = record.sequence().iter().collect();
+    // Quality scores iterator yields raw Phred integers (already decoded
+    // from the binary representation).
+    let qualities: Vec<u8> = record.quality_scores().iter().collect();
+
+    let mut cigar = Vec::with_capacity(record.cigar().len());
+    for op_res in record.cigar().iter() {
+        let op = op_res?;
+        cigar.push((cigar_kind_to_op(op.kind()), op.len() as u32));
+    }
+
+    Ok(Some(AlignedRead {
+        chrom_id,
+        ref_start,
+        mapping_quality,
+        is_reverse,
+        sequence,
+        qualities,
+        cigar,
+    }))
+}
+
+/// Read every primary alignment from `path` into an in-memory vector.
+/// Records are returned in the order they appear in the BAM — the caller
+/// is expected to group by `chrom_id` before pileup.
+///
+/// This is the simplest reader for v1; an indexed streaming variant
+/// (`query` by region) lands alongside per-shard parallelism in a later
+/// pass. For viral/bacterial sizes the full in-memory scan is fine.
+pub fn read_bam_aligned(path: &std::path::Path) -> Result<Vec<AlignedRead>, PileupError> {
+    let mut reader = std::fs::File::open(path)
+        .map(noodles_bam::io::Reader::new)?;
+    let _header = reader.read_header()?;
+    let mut out = Vec::new();
+    for record_res in reader.records() {
+        let record = record_res?;
+        if let Some(r) = record_to_aligned_read(&record)? {
+            out.push(r);
+        }
+    }
+    Ok(out)
+}
+
+/// Read the BAM header and return the list of `(ref_name, ref_length)`
+/// pairs in the order they appear, matching `chrom_id` indexing.
+pub fn read_bam_contigs(
+    path: &std::path::Path,
+) -> Result<Vec<(String, u32)>, PileupError> {
+    let mut reader = std::fs::File::open(path)
+        .map(noodles_bam::io::Reader::new)?;
+    let header = reader.read_header()?;
+    let mut out = Vec::new();
+    for (name, seq) in header.reference_sequences() {
+        // `name` is `BString`; lossy-convert to keep the output type simple.
+        let n = String::from_utf8_lossy(name.as_ref()).into_owned();
+        let len = usize::from(seq.length()) as u32;
+        out.push((n, len));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

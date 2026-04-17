@@ -13,6 +13,10 @@ default-run = "lofreq-gxy"
 name = "lofreq-gxy"
 path = "src/main.rs"
 
+[[bin]]
+name = "gxy-make-fixture"
+path = "src/bin/make_fixture.rs"
+
 [lib]
 name = "lofreq_gxy"
 path = "src/lib.rs"
@@ -26,6 +30,7 @@ noodles-sam = "0.84"
 noodles-fasta = "0.60"
 noodles-core = "0.19"
 rayon = "1.10"
+bstr = "1"
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
