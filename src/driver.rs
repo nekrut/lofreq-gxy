@@ -85,13 +85,6 @@ pub fn run(args: &CallArgs) -> Result<usize, DriverError> {
         );
     }
 
-    // Validate that every BAM reference has a matching FASTA entry.
-    for (name, _) in &contigs {
-        if !refmap.contains_key(name) {
-            return Err(DriverError::MissingReference(name.clone()));
-        }
-    }
-
     let reads = read_bam_aligned(bam_path)?;
     if args.verbose || args.debug {
         eprintln!("lofreq-gxy: {} primary alignments", reads.len());
@@ -115,7 +108,19 @@ pub fn run(args: &CallArgs) -> Result<usize, DriverError> {
 
     let mut call_count = 0usize;
     for (chrom_id, (name, _)) in contigs.iter().enumerate() {
-        let refseq = refmap.get(name).expect("validated above");
+        // Skip contigs we have no reference for — that's intentional when
+        // the user supplies a subset FASTA (e.g. MT only) against a
+        // whole-genome BAM. Only error if such a contig has reads, which
+        // would be a real data-vs-reference mismatch.
+        let refseq = match refmap.get(name) {
+            Some(s) => s,
+            None => {
+                if !by_chrom[chrom_id].is_empty() {
+                    return Err(DriverError::MissingReference(name.clone()));
+                }
+                continue;
+            }
+        };
         // Sort reads by ref_start so the pileup builder can stream.
         let mut chrom_reads: Vec<AlignedRead> =
             by_chrom[chrom_id].iter().map(|r| (*r).clone()).collect();
