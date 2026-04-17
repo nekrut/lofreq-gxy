@@ -325,20 +325,40 @@ fn cigar_kind_to_op(kind: noodles_sam::alignment::record::cigar::op::Kind) -> Ci
     }
 }
 
+/// Configuration for the BAM → `AlignedRead` adapter. Controls which
+/// alignments get excluded at load time.
+#[derive(Debug, Clone, Copy)]
+pub struct BamReadFilter {
+    /// Keep "orphan" reads — paired reads whose mate is unmapped or
+    /// mapped to a different reference sequence. Upstream `lofreq call`
+    /// drops these by default; keeping them inflates depth and can cause
+    /// false-positive low-AF calls in repetitive regions (see
+    /// docs/parity/hg002_mt.md).
+    pub use_orphan: bool,
+}
+
+impl Default for BamReadFilter {
+    fn default() -> Self {
+        // Match upstream defaults.
+        Self { use_orphan: false }
+    }
+}
+
 /// Turn one `noodles_bam::Record` into our BAM-agnostic [`AlignedRead`].
 ///
 /// Returns `Ok(None)` for records that are unmapped, secondary, or
 /// supplementary — the lofreq SNV pileup only considers primary alignments
 /// and upstream does the same. QC-fail and duplicate records are also
-/// filtered here (matching `lofreq_call.c` defaults).
+/// filtered here (matching `lofreq_call.c` defaults). Orphan reads
+/// (paired-with-unmapped-mate or mate on a different reference) are
+/// dropped unless `filter.use_orphan` is set.
 pub fn record_to_aligned_read(
     record: &noodles_bam::Record,
+    filter: BamReadFilter,
 ) -> std::io::Result<Option<AlignedRead>> {
     use noodles_sam::alignment::record::Flags;
 
     let flags = record.flags();
-    // Bitflags from noodles-sam's `Flags` type; test the raw bits so the
-    // same check works across upstream reorderings.
     let bits = flags.bits();
     let unmapped = (bits & Flags::UNMAPPED.bits()) != 0;
     let secondary = (bits & Flags::SECONDARY.bits()) != 0;
@@ -353,6 +373,24 @@ pub fn record_to_aligned_read(
         Some(res) => res?,
         None => return Ok(None),
     };
+
+    // Orphan check: paired read whose mate is unmapped, or mapped to a
+    // different reference. Upstream's default. `--use-orphan` keeps them.
+    if !filter.use_orphan {
+        let paired = (bits & Flags::SEGMENTED.bits()) != 0;
+        if paired {
+            let mate_unmapped = (bits & Flags::MATE_UNMAPPED.bits()) != 0;
+            if mate_unmapped {
+                return Ok(None);
+            }
+            if let Some(Ok(mate_id)) = record.mate_reference_sequence_id() {
+                if mate_id != chrom_id {
+                    return Ok(None);
+                }
+            }
+        }
+    }
+
     let ref_start = match record.alignment_start() {
         Some(res) => {
             let pos = res?;
@@ -397,14 +435,17 @@ pub fn record_to_aligned_read(
 /// This is the simplest reader for v1; an indexed streaming variant
 /// (`query` by region) lands alongside per-shard parallelism in a later
 /// pass. For viral/bacterial sizes the full in-memory scan is fine.
-pub fn read_bam_aligned(path: &std::path::Path) -> Result<Vec<AlignedRead>, PileupError> {
+pub fn read_bam_aligned(
+    path: &std::path::Path,
+    filter: BamReadFilter,
+) -> Result<Vec<AlignedRead>, PileupError> {
     let mut reader = std::fs::File::open(path)
         .map(noodles_bam::io::Reader::new)?;
     let _header = reader.read_header()?;
     let mut out = Vec::new();
     for record_res in reader.records() {
         let record = record_res?;
-        if let Some(r) = record_to_aligned_read(&record)? {
+        if let Some(r) = record_to_aligned_read(&record, filter)? {
             out.push(r);
         }
     }
