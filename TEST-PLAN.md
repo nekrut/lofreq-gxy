@@ -110,12 +110,15 @@ Automation in place:
   precision/recall against a third-party truth VCF (ready for when
   one exists).
 
-**First-run finding: Jaccard = 0.2317, not 0.99.** Upstream's 19
-calls are a strict subset of lofreq-gxy's 82. The gap is explained
-by upstream's BAQ recalibration, orphan-read filtering, and default
-`lofreq filter` post-processing — all PLAN.md-scoped-out-of-v1
-features. See [`docs/parity/hg002_mt.md`](docs/parity/hg002_mt.md)
-for the root-cause analysis + remediation order.
+**Run 1 (baseline):** Jaccard = 0.2317. Upstream's 19 calls were a
+strict subset of lofreq-gxy's 82; 63 extras clustered in the D-loop.
+
+**Run 2 (after orphan filter + default filter chain + skip-N
+reference):** **Jaccard = 0.9048**. Every upstream call is now in
+gxy's set; 2 remaining gxy-only calls are boundary cases that need
+FDR-corrected filters to close. See
+[`docs/parity/hg002_mt.md`](docs/parity/hg002_mt.md) for the
+progression and the remaining gap analysis.
 
 **Truth VCF:** GIAB CMRG v1.00 is autosomal-only; GIAB v4.2.1
 excludes chrM; no released GIAB MT truth set exists today. The
@@ -207,8 +210,9 @@ harness:
 
 - Tier 0: ✅ 73 unit tests
 - Tier 1.1 (synthetic SARS-CoV-2): ✅ 4 depths committed, Jaccard 1.0
-- Tier 1.2 (HG002 MT): ✅ wired + first run done; Jaccard 0.23,
-  root cause documented in `docs/parity/hg002_mt.md`
+- Tier 1.2 (HG002 MT): ✅ wired + second run at Jaccard 0.9048
+  (up from initial 0.2317); remaining gap documented in
+  `docs/parity/hg002_mt.md`
 - Tier 1.3 (real ARTIC sample): planned
 - Tier 2: harness ready; no datasets run yet
 - Tier 3: not started

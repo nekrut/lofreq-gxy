@@ -15,10 +15,10 @@ use std::path::{Path, PathBuf};
 
 use crate::caller::{Call, CallerConfig, call_column};
 use crate::cli::CallArgs;
-use crate::filter::strand_bias_phred;
+use crate::filter::{DefaultFilter, strand_bias_phred};
 use crate::pileup::{
-    AlignedRead, Base, PileupColumn, PileupError, pileup_from_reads, read_bam_aligned,
-    read_bam_contigs,
+    AlignedRead, Base, BamReadFilter, PileupColumn, PileupError, pileup_from_reads,
+    read_bam_aligned, read_bam_contigs,
 };
 use crate::reference::{FastaError, load_reference};
 use crate::vcf::{Dp4, VcfError, VcfWriter};
@@ -85,10 +85,26 @@ pub fn run(args: &CallArgs) -> Result<usize, DriverError> {
         );
     }
 
-    let reads = read_bam_aligned(bam_path)?;
+    let bam_filter = BamReadFilter {
+        use_orphan: args.use_orphan,
+    };
+    let reads = read_bam_aligned(bam_path, bam_filter)?;
     if args.verbose || args.debug {
-        eprintln!("lofreq-gxy: {} primary alignments", reads.len());
+        eprintln!(
+            "lofreq-gxy: {} primary alignments (use_orphan={})",
+            reads.len(),
+            args.use_orphan
+        );
     }
+
+    // Default post-call filter chain. `--no-default-filter` disables it
+    // (matches upstream's behaviour where `lofreq call` auto-runs
+    // `lofreq filter` unless told not to).
+    let default_filter: Option<DefaultFilter> = if args.no_default_filter {
+        None
+    } else {
+        Some(DefaultFilter::default())
+    };
 
     // Group reads by chromosome so each chrom's pileup only scans its own
     // subset of reads.
@@ -141,6 +157,11 @@ pub fn run(args: &CallArgs) -> Result<usize, DriverError> {
                     dp4.alt_fwd as u64,
                     dp4.alt_rev as u64,
                 );
+                if let Some(f) = default_filter.as_ref() {
+                    if !f.passes(call.depth, call.allele_freq, sb, call.raw_pvalue) {
+                        continue;
+                    }
+                }
                 writer.write_snv(name, &call, dp4, sb)?;
                 call_count += 1;
             }

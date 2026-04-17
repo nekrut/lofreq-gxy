@@ -100,6 +100,14 @@ pub fn call_column(col: &PileupColumn, cfg: &CallerConfig) -> Vec<Call> {
         return Vec::new();
     }
 
+    // Skip columns where the reference base itself is `N`. This happens at
+    // the rCRS pos-3107 filler and at any repeat-masked / gap position. A
+    // call of `N → A` is meaningless (every observation looks like an
+    // "alt") and matches upstream's behaviour.
+    if col.ref_base == Base::N {
+        return Vec::new();
+    }
+
     if ref_only_fast_path(col, cfg.ref_only_mq_threshold) {
         return Vec::new();
     }
@@ -378,5 +386,18 @@ mod tests {
             ..Default::default()
         };
         assert!(call_column(&cols[0], &cfg).is_empty());
+    }
+
+    #[test]
+    fn n_reference_base_is_not_called() {
+        // Mirrors the rCRS pos-3107 filler situation: reference reads `N`,
+        // observations are real bases. We should NOT emit calls here.
+        let refseq = b"N";
+        let reads: Vec<AlignedRead> = (0..50)
+            .map(|_| make_read(0, b"A", &[30], false))
+            .collect();
+        let cols = pileup_from_reads(0, refseq, reads.iter(), 0, 0);
+        let calls = call_column(&cols[0], &CallerConfig::default());
+        assert!(calls.is_empty(), "N ref base should emit no calls, got {:?}", calls);
     }
 }

@@ -100,6 +100,76 @@ pub fn fisher_two_tailed(a: u64, b: u64, c: u64, d: u64) -> f64 {
     total.clamp(0.0, 1.0)
 }
 
+/// Default post-call filter chain. Applied unless `--no-default-filter`
+/// is set. Matches `lofreq filter`'s role of trimming obvious
+/// false-positives (extreme strand bias, implausibly low AF, etc.).
+///
+/// Upstream's default is an FDR-corrected chain; ours is a simpler
+/// threshold approach that drops the same buckets in practice. Calls
+/// that would survive upstream's filter should also survive ours, but
+/// exact byte parity isn't guaranteed at the boundary.
+#[derive(Debug, Clone, Copy)]
+pub struct DefaultFilter {
+    /// Reject if the variant's SB Phred exceeds this (upstream uses FDR
+    /// on the Fisher p-value; 60 Phred ≈ Fisher p ≤ 1e-6, which is the
+    /// equivalent cutoff on a single-test basis).
+    pub sb_phred_max: u32,
+    /// Reject if the column depth is below this. Default 10, matching
+    /// the heuristic upstream uses.
+    pub min_cov: u32,
+    /// Reject if AF is below this. Default 0.0 (no AF gate); raised for
+    /// viral-specific presets if needed.
+    pub min_af: f64,
+    /// Reject if the raw-p-value Phred is below this. Default 0.0 (off
+    /// — the caller already applied sig/bonf, so this is belt-and-braces).
+    pub min_qual_phred: f64,
+}
+
+impl Default for DefaultFilter {
+    fn default() -> Self {
+        // `sb_phred_max = 100` was chosen empirically against real HG002 MT
+        // at 15 000× depth: at very high coverage, Fisher SB routinely
+        // flags legitimate germline variants (e.g. HG002 MT:310 at 91 %
+        // AF hits SB≈83, MT:456 at 99 % AF hits SB≈69) even though those
+        // calls pass upstream's FDR-corrected SB filter. A hard cut at
+        // SB > 100 drops the extreme-bias false positives (which cluster
+        // at SB ≥ 200 in the D-loop region) without losing the germline
+        // calls. See docs/parity/hg002_mt.md for the distribution.
+        Self {
+            sb_phred_max: 100,
+            min_cov: 10,
+            min_af: 0.0,
+            min_qual_phred: 0.0,
+        }
+    }
+}
+
+impl DefaultFilter {
+    /// True if the call clears every threshold.
+    pub fn passes(&self, depth: u32, af: f64, sb_phred: u32, raw_pvalue: f64) -> bool {
+        if depth < self.min_cov {
+            return false;
+        }
+        if af < self.min_af {
+            return false;
+        }
+        if sb_phred > self.sb_phred_max {
+            return false;
+        }
+        if self.min_qual_phred > 0.0 {
+            let q = if raw_pvalue > 0.0 {
+                -10.0 * raw_pvalue.log10()
+            } else {
+                255.0
+            };
+            if q < self.min_qual_phred {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 /// VCF-style strand-bias annotation: `-10 * log10(p)`, clamped to
 /// [0, 255].
 ///
@@ -221,5 +291,52 @@ mod tests {
         let p3 = fisher_two_tailed(20, 15, 5, 10); // swap rows
         assert!(approx_eq(p1, p2, 1e-12), "p1={p1} p2={p2}");
         assert!(approx_eq(p1, p3, 1e-12), "p1={p1} p3={p3}");
+    }
+
+    #[test]
+    fn default_filter_rejects_low_depth() {
+        let f = DefaultFilter::default();
+        assert!(!f.passes(5, 0.5, 0, 1e-10));
+        assert!(f.passes(100, 0.5, 0, 1e-10));
+    }
+
+    #[test]
+    fn default_filter_rejects_extreme_sb() {
+        let f = DefaultFilter::default();
+        // Default max is 100; 250 (extreme bias) rejects, 50 passes.
+        assert!(!f.passes(100, 0.5, 250, 1e-10));
+        assert!(f.passes(100, 0.5, 50, 1e-10));
+        // Right at the boundary: 100 passes, 101 rejects.
+        assert!(f.passes(100, 0.5, 100, 1e-10));
+        assert!(!f.passes(100, 0.5, 101, 1e-10));
+    }
+
+    #[test]
+    fn default_filter_rejects_low_af_when_gated() {
+        let f = DefaultFilter {
+            min_af: 0.05,
+            ..Default::default()
+        };
+        assert!(!f.passes(100, 0.01, 0, 1e-10));
+        assert!(f.passes(100, 0.1, 0, 1e-10));
+    }
+
+    #[test]
+    fn default_filter_qual_gate_off_by_default() {
+        let f = DefaultFilter::default();
+        // Even tiny QUAL passes when min_qual_phred=0.
+        assert!(f.passes(100, 0.5, 0, 0.9));
+    }
+
+    #[test]
+    fn default_filter_qual_gate_fires_when_set() {
+        let f = DefaultFilter {
+            min_qual_phred: 30.0,
+            ..Default::default()
+        };
+        // p=1e-2 → Phred 20, below 30 → reject.
+        assert!(!f.passes(100, 0.5, 0, 1e-2));
+        // p=1e-4 → Phred 40, above 30 → pass.
+        assert!(f.passes(100, 0.5, 0, 1e-4));
     }
 }

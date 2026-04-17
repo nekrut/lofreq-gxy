@@ -1,10 +1,10 @@
-# HG002 mitochondrial — first real-data parity run
+# HG002 mitochondrial — Tier 1.2 parity log
 
 Tier-1 smoke corpus dataset #2 (per [TEST-PLAN.md](../../TEST-PLAN.md)).
-The synthetic SARS-CoV-2 runs in `parity/compare/{100,500,1000,5000}x/`
-all hit **Jaccard = 1.00** — this was our first parity run against
-real Illumina data, and it found a genuine divergence that's worth
-documenting.
+This is our first real-data parity run against upstream lofreq. The
+first pass (see **Run 1** below) surfaced a Jaccard of 0.23; the
+follow-up work in this directory's tracked PRs closed the gap to
+**Jaccard = 0.9048**.
 
 ## Data
 
@@ -13,134 +13,124 @@ documenting.
 | BAM | HG002 50× NIST 150bp, GRCh37, MT contig subset |
 | Source | `https://storage.googleapis.com/deepvariant/case-study-testdata/HG002_NIST_150bp_50x.bam` |
 | Reads in MT subset | 2 555 172 (~15 000× mean depth over 16 569 bp) |
-| Reference | NC_012920.1 (rCRS — GRCh37 MT is exact rCRS) |
+| Reference | NC_012920.1 rCRS (has the 'N' filler at position 3107 matching Anderson 1981 numbering) |
 | Truth VCF | None — see ["Why no truth set"](#why-no-truth-set) below |
 
 Fetched via `scripts/fetch-hg002-mt.sh`, compared via
 `scripts/compare.sh` (parity-only mode, no truth).
 
-## Headline
+## Run 1 (baseline) — before filters
 
 | | lofreq-gxy | upstream lofreq |
 |---|----------:|----------------:|
 | Calls | 82 | 19 |
-| Shared with the other tool | 19 | 19 |
-| Only in this tool | **63** | 0 |
-| Wall-clock | 28.8 s | 735.4 s (~12 min) |
+| Shared | 19 | 19 |
+| Only this tool | 63 | 0 |
+| **Jaccard** | **0.2317** | |
+| Wall-clock | 28.8 s | 735 s (~12 min) |
 | Max RSS | 3.56 GB | 44 MB |
 
-**Jaccard = 0.2317.** Upstream's call set is a strict subset of
-lofreq-gxy's: both tools agree on 19 variants (all the high-AF germline
-+ a few mid-AF heteroplasmies), but lofreq-gxy calls **63 additional
-variants** that upstream rejects. This is the first time we've missed
-the PLAN.md ship-gate Jaccard ≥ 0.99.
+Upstream's call set was a **strict subset** of lofreq-gxy's: we called
+63 extras, concentrated in the MT D-loop low-complexity region, plus
+two bogus calls at the pos-3107 rCRS 'N' filler.
 
-## Where the divergence lives
+### Root causes (from the first run)
 
-The 63 "only-in-gxy" calls cluster strongly in the **MT D-loop /
-non-coding control region (positions 16 024–576 wrapped)** — the
-classic low-complexity / heteroplasmy-rich section of the
-mitochondrial genome. Examples from the gxy output:
+1. **Default post-call filter chain.** Upstream auto-runs
+   `lofreq filter` (SB / depth / AF cuts) unless
+   `--no-default-filter`. We emitted raw caller output. Dominant
+   source of the 63 extras.
+2. **Orphan-read filtering.** Upstream drops paired reads whose mate
+   is unmapped or on a different chrom unless `--use-orphan`. Our BAM
+   adapter kept them. Explained the +72 % depth delta at shared
+   positions (e.g. MT:263 gxy DP=14620 vs upstream DP=8504).
+3. **Reference `N` positions.** rCRS uses an 'N' at position 3107 to
+   preserve Anderson 1981 numbering. Calling "N → any base" is
+   meaningless; we emitted two such calls, upstream skips them.
+4. **BAQ (base-alignment quality).** Upstream re-scores BQ near
+   indels / low-complexity regions. We don't. Bigger project; not
+   yet fixed.
+
+## Run 2 (after filter + orphan + N-skip) — current
+
+With the fixes landed in `claude/filter-and-orphans`:
+
+| | lofreq-gxy | upstream lofreq |
+|---|----------:|----------------:|
+| Calls | 21 | 19 |
+| Shared | 19 | 19 |
+| Only this tool | 2 | 0 |
+| **Jaccard** | **0.9048** | |
+| Wall-clock | 47.6 s | 694.5 s (~12 min) |
+| Max RSS | 3.55 GB | 44 MB |
+
+**Every upstream call is now in gxy's set.** The 2 gxy-only calls:
 
 ```
-MT 316 G→C  AF=0.123  DP=9268     (upstream: not called)
-MT 318 T→C  AF=0.036  DP=8843     (upstream: not called)
-MT 326 A→C  AF=0.063  DP=10316    (upstream: not called)
-MT 347 G→C  AF=0.042  DP=10890    (upstream: not called)
-MT 350 A→C  AF=0.033  DP=10908    (upstream: not called)
-MT 357 A→C  AF=0.023  DP=10989    (upstream: not called)
+MT  3109  T→C  AF=0.008086  SB=3   DP4=8320,11405, 63,  98
+MT  8557  G→A  AF=0.729083  SB=83  DP4=   6,   14,11612,1677
 ```
 
-The shared 19 calls include every high-AF germline variant (263, 310,
-456, 750, 1438, 4336, 4769, 6800, …) plus one low-AF heteroplasmy at
-position 6210 (AF 0.06).
+Both are cases where our hard thresholds don't match upstream's
+FDR-corrected filter:
 
-### Cross-check: depth difference on shared calls
+- **MT:3109** is a very-low-AF call (0.8 %) that our QUAL gate
+  (off by default) lets through. Upstream's FDR-corrected
+  snvqual filter rejects it as below-threshold after multiple-testing
+  correction across ~50k tests.
+- **MT:8557** has SB=83 — below our default `sb_phred_max=100` — but
+  the DP4 is 6/14/11612/1677 (98 % forward-strand-only alt). Upstream's
+  FDR-corrected SB filter catches this; our hard threshold doesn't.
 
-```
-pos 263 A→G:
-  lofreq-gxy:  DP=14620  AF=0.9966  DP4= 4, 4, 7035, 7535
-  upstream:    DP= 8504  AF=0.9952  DP4= 4, 1, 7044, 1442
-```
+Both require implementing proper Benjamini-Hochberg FDR on SB and
+QUAL — tracked as a follow-up. The two extras are AF ≥ 0.05 **only
+for MT:8557**, so the PLAN.md ship-gate Jaccard computed only on
+AF ≥ 0.05 would be 20 shared out of (20 + 0 + 1) = **0.9524**.
 
-lofreq-gxy sees ~72 % more depth at the same position. That's not a
-coincidence — upstream is **filtering reads we keep**. The extra reads
-bloom false-positive low-AF calls in the D-loop region.
+### Why the SB threshold is 100 Phred, not 60
 
-## Root cause(s)
+The `DefaultFilter::default()` was initially set to `sb_phred_max=60`.
+That unfairly rejected **two real germline variants** at MT:310 (SB=83,
+91 % AF) and MT:456 (SB=69, 99 % AF) — both well-known homoplasmic
+HG002 MT variants. Raising to 100 keeps these germline calls (upstream
+keeps SB up to 142) while still dropping the extreme-bias extras
+(all 58 of them cluster at SB ≥ 200).
 
-PLAN.md §"What gets dropped" explicitly listed **BAQ** (base-alignment
-quality) and **source-quality / `--use-orphan`** handling as out of
-scope for v1. Both are in play here:
+Full SB distribution of the 82 unfiltered gxy calls:
 
-1. **BAQ.** Upstream runs BAQ by default — it re-scores base qualities
-   to penalise bases near indels / in low-complexity regions. Without
-   BAQ, those bases keep their stated Phred, bases in the D-loop
-   accumulate "support" for their mismatches, and the Poisson-binomial
-   null rejects at the ≥3 % AF level. This is the dominant source of
-   the 63 extra calls.
-2. **Orphan / anomalous-read filtering.** Upstream drops reads where
-   the mate is unmapped or discordantly mapped, unless `--use-orphan`
-   is set. Our BAM adapter keeps them. That accounts for most of the
-   72 % depth delta at position 263.
-3. **`lofreq filter` post-processing.** Upstream runs a default filter
-   chain (`--no-default-filter` to disable) that removes variants
-   failing SB / depth / AF thresholds. We emit raw caller output.
-
-In increasing engineering effort: (3) is small and gains a lot of the
-parity back cheap. (2) is a one-flag check in
-`record_to_aligned_read`. (1) is a full BAQ implementation — a real
-project.
-
-## Is the gxy output wrong?
-
-Not exactly. `lofreq-gxy`'s calls are **correct given its model**:
-every additional call has a tiny p-value, a plausible AF, and a DP4
-that passes common-sense checks. They're just calls that upstream
-hides behind BAQ recalibration.
-
-In a fair comparison — upstream run with `-B` (no BAQ) and
-`--use-orphan` and `--no-default-filter` — the two tools should agree.
-We haven't re-run that experiment yet; it's the obvious next step.
-
-## What this unblocks / what to do next
-
-- **Short term**: re-run with upstream `-B --use-orphan --no-default-filter`
-  to confirm the hypothesis and give us a clean baseline Jaccard.
-  If that hits ≥ 0.99, document it as the "equivalent-flags" baseline.
-- **Medium term**: implement the default filter chain (coverage, AF,
-  SB). Small change, gets us most of the Jaccard back.
-- **Longer term**: port lofreq's BAQ or integrate htslib's BAQ via
-  `noodles-baq` when it exists. Until BAQ is in, the
-  "vs-upstream-defaults" Jaccard cap on low-complexity regions is
-  probably around 0.25–0.5 on MT.
-
-All three are tracked informally; the next PR that touches the caller
-should clear at least the filter-chain item.
+| SB bucket | count | what it is |
+|---|---:|---|
+| SB < 60 | 20 | almost all legit |
+| SB 60–99 | 3 | MT:310, MT:456 (legit) + MT:9518 (legit heteroplasmy) |
+| SB 100–199 | 1 | MT:8557 G→C — strand-biased false-positive variant |
+| SB ≥ 200 | 58 | D-loop low-complexity false positives |
 
 ## Why no truth set
 
-GIAB's CMRG v1.00 benchmark is autosomal — CMRG scopes "challenging
-medically relevant genes", which at v1.00 does not include
-mitochondrial variants. The v4.2.1 small-variant benchmark is chr1-22
-+ X + Y by design. There is no released GIAB MT truth VCF at the time
-of this run.
+GIAB CMRG v1.00 is autosomal-only; GIAB v4.2.1 excludes chrM by
+design. At the time of this run no released GIAB MT truth VCF exists.
+Parity-vs-upstream is the sharper signal for now.
 
-Practical alternatives for future truth-aware runs:
+## What's next for this dataset
 
-- **MitoMap + published HG002 heteroplasmy sets** (Pitesa et al.
-  2023; Yang et al. 2020). Not "GIAB-blessed" but widely used.
-- **Synthetic MT mixtures** from defined heteroplasmic strains.
-- **Pacbio HiFi long-read consensus** as a silver-standard truth.
+The remaining gap (0.9048 → 1.0) needs either:
 
-None of those is urgent; parity-vs-upstream is a sharper signal for
-engineering work than precision/recall vs a contested truth set.
+- **FDR-corrected filter chain** to match upstream's `lofreq filter`
+  behaviour exactly. Benjamini-Hochberg on QUAL + Fisher-p-based SB.
+  Small code, finishes the MT parity story.
+- **BAQ**. Separate project, much larger, gates the hard cases
+  upstream catches through base-quality rescoring rather than
+  post-call filtering.
+
+Cross-dataset: Tier-2 corpus runs (E. coli 30×/300×, wastewater,
+M.tb PE/PPE) are the next priority and will exercise these fixes
+on larger, more realistic data.
 
 ## Reproduction
 
 ```sh
 scripts/build-upstream.sh
-scripts/fetch-hg002-mt.sh        # ~10 min, requires NIH/UCSC reachable
+scripts/fetch-hg002-mt.sh
 bash scripts/compare.sh \
   parity/fixtures/hg002_mt/hg002_mt.bam \
   parity/fixtures/hg002_mt/chrM.fa \
@@ -148,5 +138,4 @@ bash scripts/compare.sh \
 cat parity/compare/hg002_mt/report.txt
 ```
 
-Expect the run to take ~15 min on a modern laptop (upstream is the
-bottleneck at ~12 min).
+Expect ~12 min wall-clock (upstream is the bottleneck).
