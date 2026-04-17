@@ -81,8 +81,8 @@ not a new method.
 | `lofreq uniq`, `vcfset` | Thin shell utilities over `bcftools isec` / `bcftools merge` |
 | `lofreq call-parallel` | Obsolete — rayon does it better inside the process |
 | `lofreq indelqual`, `alnqual` | Auto-runs inside `call` when needed; no separate subcommand |
-| BAQ / extended BAQ / source quality | Kept the flags for CLI parity, no-op today (the statistical gain at viral depths is marginal and upstream's own docs mark them optional) |
-| Most of `lofreq_filter.c` (1345 LOC) | Collapsed inline: Fisher SB + HRUN at call time, coverage / AF gates via caller config |
+| BAQ / extended BAQ / source quality | Flags kept for CLI parity but BAQ is currently a no-op. Upstream's own docs mark them optional; at high real-data depths BAQ does contribute to upstream's false-positive suppression (see `docs/parity/hg002_mt.md`). A port is tracked as a follow-up. |
+| Most of `lofreq_filter.c` (1345 LOC) | Collapsed inline: Fisher SB + HRUN at call time; `filter::DefaultFilter` applies SB / depth / AF / QUAL cuts at call emission (matches upstream's default `--no-default-filter` behaviour). FDR-corrected variant of this filter is the obvious next PR. |
 | CRAM input | BAM is universal; CRAM behind a feature flag if someone asks |
 | Diploid / vertebrate priors | PLAN.md explicit non-goal |
 
@@ -104,7 +104,8 @@ not a new method.
                      │ (streaming records)
           ┌──────────▼───────────┐
           │    record_to_aligned_read     │   pileup.rs
-          │    filter unmapped / dup      │
+          │    drop unmapped / dup        │
+          │    drop orphans (default)     │
           └──────────┬───────────┘
                      │
      ┌───────────────┴──────────────┐
@@ -128,7 +129,9 @@ not a new method.
           ▼                             ▼
    ┌──────────────┐              ┌──────────────┐
    │ Fisher SB,   │              │  HRUN filter │
-   │ DP4 compute  │    filter.rs │              │
+   │ DP4 compute, │    filter.rs │              │
+   │ default      │              │              │
+   │ post-filter  │              │              │
    └──────┬───────┘              └──────┬───────┘
           │                             │
           ▼                             ▼
@@ -298,7 +301,7 @@ Progression of this number across the real-data runs:
 | PR | Change | Jaccard | Only-gxy |
 |---|---|---:|---:|
 | #6 | First real-data run (no post-call filter) | 0.2317 | 63 |
-| *this branch* | + orphan-read filter + default SB/cov filter + skip-N reference | **0.9048** | 2 |
+| #7 | + orphan-read filter + default SB/cov filter + skip-N reference | **0.9048** | 2 |
 
 Full progression and remaining-gap analysis in
 [`docs/parity/hg002_mt.md`](docs/parity/hg002_mt.md).
@@ -371,20 +374,20 @@ Exactly the same injections, exactly the same calls. Both tools.
 | Module | Purpose | Lines |
 |---|---|---:|
 | `cli.rs` | Clap CLI; mirrors every `lofreq call` flag with upstream defaults from `snpcaller.h` | 420 |
-| `pileup.rs` | SoA `PileupColumn`, streaming `PileupBuilder`, `noodles-bam` adapter | 530 |
-| `quality.rs` | 256-entry Phred LUT, MQ+BQ merge, batch entry points for future SIMD | 250 |
-| `caller.rs` | Poisson-binomial with significance + adaptive pruning, ref-only fast-path | 375 |
-| `indel.rs` | Hash-keyed indel pileup, HRUN homopolymer length, IDAQ default | 390 |
-| `filter.rs` | Fisher two-tailed exact test, `strand_bias_phred` wrapper | 220 |
-| `vcf.rs` | VCF 4.2 writer (fileDate + contigs + DP/AF/SB/DP4/HRUN), identifier validation | 380 |
-| `region.rs` | 50 kb shard partitioning + rayon work-stealing dispatch | 250 |
-| `reference.rs` | Whole-FASTA-in-memory loader via `noodles-fasta` | 100 |
-| `driver.rs` | End-to-end BAM + FASTA → VCF pipeline | 290 |
-| `bin/make_fixture.rs` | Deterministic synthetic BAM generator | 270 |
-| `benches/hotpath.rs` | Criterion micro-benchmarks for the four hot paths | 125 |
+| `pileup.rs` | SoA `PileupColumn`, streaming `PileupBuilder`, `noodles-bam` adapter, orphan-read filter | 611 |
+| `quality.rs` | 256-entry Phred LUT, MQ+BQ merge, batch entry points for future SIMD | 249 |
+| `caller.rs` | Poisson-binomial with significance + adaptive pruning, ref-only fast-path, N-ref skip | 403 |
+| `indel.rs` | Hash-keyed indel pileup, HRUN homopolymer length, IDAQ default | 388 |
+| `filter.rs` | Fisher two-tailed exact test, `strand_bias_phred`, default post-call filter chain | 342 |
+| `vcf.rs` | VCF 4.2 writer (fileDate + contigs + DP/AF/SB/DP4/HRUN), identifier validation | 429 |
+| `region.rs` | 50 kb shard partitioning + rayon work-stealing dispatch | 248 |
+| `reference.rs` | Whole-FASTA-in-memory loader via `noodles-fasta` | 98 |
+| `driver.rs` | End-to-end BAM + FASTA → VCF pipeline | 321 |
+| `bin/make_fixture.rs` | Deterministic synthetic BAM generator | 267 |
+| `benches/hotpath.rs` | Criterion micro-benchmarks for the four hot paths | 123 |
 
-73 unit tests today (`cargo test`), plus the parity harness as the
-integration check.
+79 unit tests (`cargo test`) plus the real-data parity harness. Crate
+totals ~3 950 lines of Rust across 14 files.
 
 ---
 
