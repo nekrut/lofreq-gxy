@@ -6,9 +6,11 @@
 
 pub mod caller;
 pub mod cli;
+pub mod driver;
 pub mod filter;
 pub mod indel;
 pub mod pileup;
 pub mod quality;
+pub mod reference;
 pub mod region;
 pub mod vcf;

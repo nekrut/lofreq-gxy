@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use lofreq_gxy::cli::{Cli, Command};
+use lofreq_gxy::driver;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -15,15 +16,18 @@ fn main() -> ExitCode {
                 eprintln!("error: {msg}");
                 return ExitCode::from(2);
             }
-            // Subsequent PLAN.md steps replace this stub with the real pipeline
-            // (pileup → caller → VCF). Keep the stub explicit so the CLI is
-            // independently testable today.
-            eprintln!(
-                "lofreq-gxy call: pipeline not yet implemented (bam={}, ref={})",
-                args.bam.display(),
-                args.reference.display(),
-            );
-            ExitCode::from(64)
+            match driver::run(&args) {
+                Ok(n) => {
+                    if args.verbose || args.debug {
+                        eprintln!("lofreq-gxy: {n} variant record(s) written");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::from(1)
+                }
+            }
         }
     }
 }
