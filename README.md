@@ -8,7 +8,10 @@ schema, single static binary, no Python or htslib runtime dependencies.
 On the synthetic SARS-CoV-2 benchmark below `lofreq-gxy` produces a
 **Jaccard = 1.0000** call set vs upstream lofreq v2.1.5 at 100×, 500×,
 1000×, and 5000× coverage with **zero** allele-frequency divergence,
-while running **13×–21× faster**.
+while running **13×–21× faster**. On real HG002 mitochondrial data
+(15 000× over the MT D-loop) parity drops to **Jaccard = 0.23** because
+of BAQ / orphan-read filtering we haven't ported yet — see
+[`docs/parity/hg002_mt.md`](docs/parity/hg002_mt.md) for the analysis.
 
 ```
 $ lofreq-gxy call -f ref.fa -o sample.vcf sample.bam
@@ -261,9 +264,50 @@ Two systematic differences, both explained:
    rounding disagrees at integer boundaries. Again, no call-set impact.
 
 The PLAN.md ship gate is **Jaccard ≥ 0.99 on AF ≥ 0.05 variants**.
-Achieved for SNVs on this fixture. Real-world fixtures (SARS-CoV-2
-ARTIC amplicon data, E. coli K12, C. auris, wastewater, M.tb PE/PPE)
-are the next stage of Tier-2 work.
+Achieved for SNVs on this synthetic fixture. On real data the ship
+gate is not yet met — see the HG002 MT section below, and the Tier-2
+roadmap in [TEST-PLAN.md](TEST-PLAN.md).
+
+### HG002 mitochondrial (Tier 1.2 — real Illumina data)
+
+Fetched via `scripts/fetch-hg002-mt.sh` (pulls MT reads from the
+public HG002 50× GRCh37 BAM via remote-indexed `samtools view`).
+2 555 172 reads over 16 569 bp — ~15 000× mean depth, rich in real
+D-loop heteroplasmy.
+
+| | lofreq-gxy | upstream lofreq |
+|---|----------:|----------------:|
+| Calls | 82 | 19 |
+| Shared | 19 | 19 |
+| Only this tool | 63 | 0 |
+| Jaccard | **0.2317** | — |
+| Wall-clock | 28.8 s | 735 s (~12 min) |
+| Max RSS | 3.56 GB | 44 MB |
+
+Upstream's call set is a **strict subset** of lofreq-gxy's: we call
+every variant upstream calls, plus 63 more — mostly in the D-loop
+low-complexity region. The gap is explained by features PLAN.md §"What
+gets dropped" explicitly scoped out of v1:
+
+1. **BAQ (base-alignment quality).** Upstream re-scores base qualities
+   near indels / in low-complexity regions; we keep raw BQ. Biggest
+   contributor to the 63 extra calls.
+2. **Orphan-read filtering.** Upstream drops reads with unmapped /
+   discordant mates by default; our BAM adapter keeps them. Explains
+   most of the +72 % depth at shared positions.
+3. **`lofreq filter` default chain.** Upstream runs a post-filter
+   (SB / depth / AF cuts) unless `--no-default-filter`. We emit raw
+   caller output.
+
+Full analysis in [`docs/parity/hg002_mt.md`](docs/parity/hg002_mt.md),
+including the expected Jaccard when upstream is run with matching
+flags (`-B --use-orphan --no-default-filter`) — that's the
+apples-to-apples baseline.
+
+The perf win **grows** on this dataset: ~25× faster than upstream
+(28.8 s vs 735 s) at real-world MT depth. Memory asymmetry is even
+wider: 3.6 GB vs 44 MB — the whole-BAM-in-memory driver is the
+bottleneck at this scale, same as the 5000× synthetic case.
 
 ### Timing (single-threaded release build)
 

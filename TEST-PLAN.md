@@ -96,30 +96,30 @@ Each dataset produces a committed `parity/compare/<dataset>/report.txt`
 
 Large artefacts (BAMs, sorted VCFs, isec trees) stay gitignored.
 
-### HG002 MT — the concrete plan
+### HG002 MT — ✅ wired, first real-data parity run done
 
-Public alignment from NIST's Illumina 2x250 HG002 data:
+Automation in place:
 
-```
-ftp://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/data/AshkenazimTrio/\
-  HG002_NA24385_son/NIST_HiSeq_HG002_Homogeneity-10953946/\
-  HG002_HiSeq300x_fastq/…
-```
+- `scripts/fetch-hg002-mt.sh` pulls MT reads from the public HG002 50×
+  GRCh37 BAM via remote-indexed `samtools view` (no full 118 GB BAM
+  download), fetches the matching rCRS reference, auto-detects the
+  contig name (`MT` vs `chrM`), and attempts to fetch GIAB CMRG truth
+  (falls back to parity-only when no MT truth is available — currently
+  the case).
+- `scripts/compare-truth.sh` extends `compare.sh` with
+  precision/recall against a third-party truth VCF (ready for when
+  one exists).
 
-Workflow:
+**First-run finding: Jaccard = 0.2317, not 0.99.** Upstream's 19
+calls are a strict subset of lofreq-gxy's 82. The gap is explained
+by upstream's BAQ recalibration, orphan-read filtering, and default
+`lofreq filter` post-processing — all PLAN.md-scoped-out-of-v1
+features. See [`docs/parity/hg002_mt.md`](docs/parity/hg002_mt.md)
+for the root-cause analysis + remediation order.
 
-1. Download the pre-aligned HG002 BAM (or pull chrM-only reads).
-2. `samtools view -b <bam> chrM > hg002_mt.bam` to subset to ~16 kb.
-3. Fetch the GIAB MT truth VCF (NCBI/GIAB releases).
-4. Run both tools, diff call set vs truth and vs each other.
-5. Report: per-AF-bin precision/recall, parity Jaccard.
-
-**Expected outcomes:**
-
-- Upstream-vs-`lofreq-gxy` Jaccard ≥ 0.99 on AF ≥ 0.05 (ship gate).
-- Precision/recall vs GIAB truth should **match upstream** — if we
-  beat upstream here, investigate (possibly a known upstream bug we
-  documented in `docs/parity/`).
+**Truth VCF:** GIAB CMRG v1.00 is autosomal-only; GIAB v4.2.1
+excludes chrM; no released GIAB MT truth set exists today. The
+fetch script tries CMRG for future-proofing and falls back cleanly.
 
 ## Tier 2: full haploid corpus
 
@@ -203,14 +203,16 @@ harness:
 
 ---
 
-## Current state (this PR)
+## Current state
 
-- Tier 0: ✅ in place
-- Tier 1.1 (synthetic SARS-CoV-2): ✅ in place; 4 depths committed
-- Tier 1.2 (HG002 MT): 🔜 next up
+- Tier 0: ✅ 73 unit tests
+- Tier 1.1 (synthetic SARS-CoV-2): ✅ 4 depths committed, Jaccard 1.0
+- Tier 1.2 (HG002 MT): ✅ wired + first run done; Jaccard 0.23,
+  root cause documented in `docs/parity/hg002_mt.md`
 - Tier 1.3 (real ARTIC sample): planned
 - Tier 2: harness ready; no datasets run yet
 - Tier 3: not started
 
 Progress lives in `parity/compare/<dataset>/report.txt` files
 committed alongside the dataset-specific fetch scripts in `scripts/`.
+Per-dataset triage notes live in `docs/parity/<dataset>.md`.
