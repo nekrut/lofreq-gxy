@@ -202,11 +202,11 @@ impl<'a> PileupBuilder<'a> {
         let mut ref_pos = read.ref_start;
         let mut read_pos: usize = 0;
         let forward = !read.is_reverse;
-        for &(op, len) in &read.cigar {
-            let len = len as usize;
+        for &(op, span) in &read.cigar {
+            let span_usize = span as usize;
             match op {
                 CigarOp::Match => {
-                    for k in 0..len {
+                    for k in 0..span_usize {
                         if read_pos + k >= read.sequence.len() {
                             break;
                         }
@@ -228,16 +228,16 @@ impl<'a> PileupBuilder<'a> {
                             .or_insert_with(|| PileupColumn::new(self.chrom_id, pos, ref_base));
                         col.push(base, bq, read.mapping_quality, forward);
                     }
-                    ref_pos += len as u32;
-                    read_pos += len;
+                    ref_pos += span;
+                    read_pos += span_usize;
                 }
                 CigarOp::Insert | CigarOp::SoftClip => {
                     // Consumes read only. Indels are handled in indel.rs;
                     // for SNV pileup we skip.
-                    read_pos += len;
+                    read_pos += span_usize;
                 }
                 CigarOp::Delete | CigarOp::RefSkip => {
-                    ref_pos += len as u32;
+                    ref_pos += span;
                 }
                 CigarOp::Pad => {
                     // no-op

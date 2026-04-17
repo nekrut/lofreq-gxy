@@ -67,22 +67,24 @@ fn ln_hypergeom_pmf(a: u64, b: u64, c: u64, d: u64) -> f64 {
 /// Returns a p-value in `[0, 1]`.
 pub fn fisher_two_tailed(a: u64, b: u64, c: u64, d: u64) -> f64 {
     let r1 = a + b; // row 1 total
-    let _r2 = c + d;
+    let r2 = c + d; // row 2 total
     let c1 = a + c; // col 1 total
-    let _c2 = b + d;
     let n = a + b + c + d;
     if n == 0 {
         return 1.0;
     }
 
-    // Observed PMF (log-space) — anything at-or-below this log value
-    // counts toward the two-tailed p-value.
+    // Observed PMF in log-space. Tables with the same row/column
+    // marginals as (a,b,c,d) but computed in a different summand order
+    // can differ by a few ULPs of `ln`, so we include anything within
+    // 1e-12 of the observed log-PMF as "equally likely" — equivalent to
+    // a 1e-12 relative tolerance on the PMF itself. That's 4+ orders of
+    // magnitude tighter than any p-value cut we'd care about and still
+    // absorbs floating-point reordering error.
     let ln_p_obs = ln_hypergeom_pmf(a, b, c, d);
-    // Tiny tolerance to avoid floating-point bouncing out equally-likely tables.
     let ln_threshold = ln_p_obs + 1e-12;
 
     // Enumerate all valid 'a' values: max(0, c1 - r2) ≤ a' ≤ min(r1, c1).
-    let r2 = _r2;
     let a_min = c1.saturating_sub(r2);
     let a_max = r1.min(c1);
     let mut total = 0.0f64;
@@ -95,11 +97,20 @@ pub fn fisher_two_tailed(a: u64, b: u64, c: u64, d: u64) -> f64 {
             total += ln_p.exp();
         }
     }
-    total.min(1.0).max(0.0)
+    total.clamp(0.0, 1.0)
 }
 
 /// VCF-style strand-bias annotation: `-10 * log10(p)`, clamped to
 /// [0, 255].
+///
+/// Arguments are in VCF `DP4` order (ref-fwd, ref-rev, alt-fwd, alt-rev).
+/// Internally we pivot into the 2x2 table Fisher expects:
+///
+/// ```text
+///            ref        alt
+///   fwd    ref_fwd    alt_fwd
+///   rev    ref_rev    alt_rev
+/// ```
 pub fn strand_bias_phred(ref_fwd: u64, ref_rev: u64, alt_fwd: u64, alt_rev: u64) -> u32 {
     let p = fisher_two_tailed(ref_fwd, alt_fwd, ref_rev, alt_rev);
     if p <= 0.0 {

@@ -25,6 +25,37 @@ pub struct VcfWriter<W: Write> {
     header_written: bool,
     reference_path: Option<String>,
     source: String,
+    /// Optional fixed `##fileDate`. When `None` we use today's UTC date.
+    /// Tests pin it so header golden files stay deterministic.
+    file_date: Option<String>,
+}
+
+/// Returned when a value we're about to format into the VCF would break
+/// the TSV grammar (embedded tabs, newlines, or `>` in a header line).
+#[derive(Debug, thiserror::Error)]
+pub enum VcfError {
+    #[error("invalid {field} `{value}`: contains whitespace or VCF metacharacters")]
+    InvalidIdentifier { field: &'static str, value: String },
+    #[error("io: {0}")]
+    Io(#[from] io::Error),
+}
+
+type Result<T> = std::result::Result<T, VcfError>;
+
+fn validate_identifier(field: &'static str, value: &str) -> Result<()> {
+    // VCF is TSV with `##<key>=<...>` header lines; `\t`, `\n`, `\r`, and
+    // `>` in a contig name or allele string would corrupt the output.
+    if value.is_empty()
+        || value
+            .bytes()
+            .any(|b| matches!(b, b'\t' | b'\n' | b'\r' | b'>' | b'<'))
+    {
+        return Err(VcfError::InvalidIdentifier {
+            field,
+            value: value.to_string(),
+        });
+    }
+    Ok(())
 }
 
 impl<W: Write> VcfWriter<W> {
@@ -34,6 +65,7 @@ impl<W: Write> VcfWriter<W> {
             header_written: false,
             reference_path: None,
             source: format!("lofreq-gxy {}", env!("CARGO_PKG_VERSION")),
+            file_date: None,
         }
     }
 
@@ -47,12 +79,28 @@ impl<W: Write> VcfWriter<W> {
         self
     }
 
+    /// Pin the `##fileDate` to a fixed string — used by tests that assert on
+    /// byte-for-byte header output. Without this the writer stamps today's
+    /// UTC date at the time of `write_header`.
+    pub fn with_file_date(mut self, date: impl Into<String>) -> Self {
+        self.file_date = Some(date.into());
+        self
+    }
+
     /// Write the `##fileformat` / `##INFO` / `#CHROM` lines. Idempotent.
-    pub fn write_header(&mut self, contigs: &[(String, u32)]) -> io::Result<()> {
+    pub fn write_header(&mut self, contigs: &[(String, u32)]) -> Result<()> {
         if self.header_written {
             return Ok(());
         }
+        for (name, _) in contigs {
+            validate_identifier("contig", name)?;
+        }
         writeln!(self.out, "##fileformat=VCFv4.2")?;
+        if let Some(ref d) = self.file_date {
+            writeln!(self.out, "##fileDate={}", d)?;
+        } else {
+            writeln!(self.out, "##fileDate={}", current_utc_date())?;
+        }
         writeln!(self.out, "##source={}", self.source)?;
         if let Some(ref r) = self.reference_path {
             writeln!(self.out, "##reference={}", r)?;
@@ -97,9 +145,11 @@ impl<W: Write> VcfWriter<W> {
         call: &Call,
         dp4: Dp4,
         sb_phred: u32,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         assert!(self.header_written, "call write_header() first");
+        validate_identifier("chrom", chrom_name)?;
         let qual = phred_from_pvalue(call.raw_pvalue);
+        let af = sanitize_af(call.allele_freq);
         // VCF is 1-based; our `position` is 0-based.
         writeln!(
             self.out,
@@ -110,13 +160,14 @@ impl<W: Write> VcfWriter<W> {
             alt = base_letter(call.alt_base),
             qual = format_qual(qual),
             dp = call.depth,
-            af = call.allele_freq,
+            af = af,
             sb = sb_phred,
             rf = dp4.ref_fwd,
             rr = dp4.ref_rev,
             af_ = dp4.alt_fwd,
             ar = dp4.alt_rev,
-        )
+        )?;
+        Ok(())
     }
 
     /// Emit one indel record. Caller supplies ref/alt alleles as ASCII
@@ -134,13 +185,16 @@ impl<W: Write> VcfWriter<W> {
         dp4: Dp4,
         sb_phred: u32,
         hrun: u32,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         assert!(self.header_written, "call write_header() first");
+        validate_identifier("chrom", chrom_name)?;
+        validate_identifier("ref_allele", ref_allele)?;
+        validate_identifier("alt_allele", alt_allele)?;
         let qual = phred_from_pvalue(raw_pvalue);
         let af = if depth == 0 {
             0.0
         } else {
-            alt_count as f64 / depth as f64
+            sanitize_af(alt_count as f64 / depth as f64)
         };
         writeln!(
             self.out,
@@ -158,7 +212,8 @@ impl<W: Write> VcfWriter<W> {
             af_ = dp4.alt_fwd,
             ar = dp4.alt_rev,
             hrun = hrun,
-        )
+        )?;
+        Ok(())
     }
 
     /// Flush the underlying writer.
@@ -207,6 +262,47 @@ fn format_qual(q: f64) -> String {
     format!("{:.2}", q)
 }
 
+/// Clamp an allele frequency to `[0, 1]` and collapse NaN/Inf to 0.0 so
+/// the formatted INFO field never contains `NaN` or `inf`.
+fn sanitize_af(af: f64) -> f64 {
+    if !af.is_finite() {
+        return 0.0;
+    }
+    af.clamp(0.0, 1.0)
+}
+
+/// Today's UTC date as `YYYYMMDD`, the format upstream lofreq uses. We
+/// compute it from `SystemTime::UNIX_EPOCH` rather than dragging in a
+/// `chrono` dependency for a single line.
+fn current_utc_date() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // Days since Unix epoch (1970-01-01).
+    let days = (secs / 86_400) as i64;
+    let (y, m, d) = civil_from_days(days);
+    format!("{:04}{:02}{:02}", y, m, d)
+}
+
+/// Howard Hinnant's `civil_from_days` — converts days-since-epoch to
+/// `(year, month, day)` in the proleptic Gregorian calendar. Avoids a
+/// chrono dep for this one call site.
+fn civil_from_days(z: i64) -> (i32, u32, u32) {
+    let z = z + 719_468; // shift epoch to 0000-03-01
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+    let year = (y + if m <= 2 { 1 } else { 0 }) as i32;
+    (year, m, d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,10 +323,13 @@ mod tests {
     #[test]
     fn header_contains_expected_lines() {
         let mut buf = Vec::new();
-        let mut w = VcfWriter::new(&mut buf).with_reference("/path/ref.fa");
+        let mut w = VcfWriter::new(&mut buf)
+            .with_reference("/path/ref.fa")
+            .with_file_date("20260417");
         w.write_header(&[("NC_045512.2".into(), 29_903)]).unwrap();
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("##fileformat=VCFv4.2\n"));
+        assert!(s.contains("##fileDate=20260417\n"));
         assert!(s.contains("##source=lofreq-gxy "));
         assert!(s.contains("##reference=/path/ref.fa\n"));
         assert!(s.contains("##contig=<ID=NC_045512.2,length=29903>"));
@@ -238,6 +337,33 @@ mod tests {
         assert!(s.contains("##INFO=<ID=SB"));
         assert!(s.contains("##INFO=<ID=HRUN"));
         assert!(s.ends_with("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"));
+    }
+
+    #[test]
+    fn contig_name_with_metacharacter_is_rejected() {
+        let mut buf = Vec::new();
+        let mut w = VcfWriter::new(&mut buf);
+        let err = w.write_header(&[("chr\t1".into(), 1)]);
+        assert!(matches!(err, Err(VcfError::InvalidIdentifier { .. })));
+    }
+
+    #[test]
+    fn sanitize_af_handles_nan_and_inf() {
+        assert_eq!(sanitize_af(f64::NAN), 0.0);
+        assert_eq!(sanitize_af(f64::INFINITY), 0.0);
+        assert_eq!(sanitize_af(-0.5), 0.0);
+        assert_eq!(sanitize_af(1.5), 1.0);
+        assert!((sanitize_af(0.25) - 0.25).abs() < 1e-12);
+    }
+
+    #[test]
+    fn civil_from_days_matches_reference_dates() {
+        // 1970-01-01 is day 0.
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        // 2000-01-01 → day 10957.
+        assert_eq!(civil_from_days(10_957), (2000, 1, 1));
+        // Leap day 2024-02-29 → day 19782.
+        assert_eq!(civil_from_days(19_782), (2024, 2, 29));
     }
 
     #[test]

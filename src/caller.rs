@@ -104,6 +104,10 @@ pub fn call_column(col: &PileupColumn, cfg: &CallerConfig) -> Vec<Call> {
         return Vec::new();
     }
 
+    // Per-observation error probabilities are independent of which alt
+    // allele we're testing (Poisson-binomial is symmetric in its inputs),
+    // so gather them once and reuse across the three alt alleles.
+    let err_probs = gather_error_probs(col, cfg.merge_mq);
     let crit = cfg.sig / cfg.bonf as f64;
     let mut out = Vec::new();
     for alt in Base::NUC {
@@ -115,10 +119,6 @@ pub fn call_column(col: &PileupColumn, cfg: &CallerConfig) -> Vec<Call> {
             continue;
         }
 
-        // Gather per-observation error probs. Reference calls already
-        // assume the base is "correct", so their contribution to the error
-        // PMF uses their merged error rate just like alts.
-        let err_probs = gather_error_probs(col, cfg.merge_mq);
         let pval = poisson_binomial_pvalue(&err_probs, alt_count as usize, Some(crit));
         if pval < crit {
             out.push(Call {
@@ -139,6 +139,12 @@ pub fn call_column(col: &PileupColumn, cfg: &CallerConfig) -> Vec<Call> {
 /// True iff every observation at this column is the reference base AND all
 /// mapping qualities clear `mq_threshold`. Under those conditions the
 /// Poisson-binomial test is guaranteed to pass the null.
+///
+/// We deliberately do not check base quality here: a column where every
+/// observation is ref cannot have any alt count, so there's no null to
+/// reject regardless of how noisy the individual ref bases are. The MQ
+/// check is what guarantees we're looking at genuinely mapped reads and
+/// not low-confidence alignments that could hide alt evidence.
 pub fn ref_only_fast_path(col: &PileupColumn, mq_threshold: u8) -> bool {
     // Non-ref counts must all be zero.
     for alt in Base::NUC {
@@ -154,12 +160,14 @@ pub fn ref_only_fast_path(col: &PileupColumn, mq_threshold: u8) -> bool {
     col.map_qual[idx].iter().all(|&q| q >= mq_threshold)
 }
 
-/// Gather all per-observation error probabilities across every allele.
-/// Order is `A → C → G → T → N`; ordering doesn't affect the PMF since
+/// Gather per-observation error probabilities across A/C/G/T. `N`
+/// observations are excluded — upstream lofreq treats them as missing
+/// data rather than errors, since they represent bases the sequencer
+/// couldn't call at all. Ordering within ACGT doesn't matter because
 /// Poisson-binomial is symmetric in its inputs.
 fn gather_error_probs(col: &PileupColumn, merge_mq: bool) -> Vec<f64> {
     let mut out = Vec::with_capacity(col.depth() as usize);
-    for b in Base::ALL {
+    for b in Base::NUC {
         let i = b.index();
         for (&bq, &mq) in col.base_qual[i].iter().zip(col.map_qual[i].iter()) {
             let p = if merge_mq {
