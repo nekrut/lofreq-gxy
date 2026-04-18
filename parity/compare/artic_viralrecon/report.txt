@@ -1,0 +1,18 @@
+=== lofreq-gxy vs upstream lofreq ===
+bam:      parity/fixtures/artic_viralrecon/artic_viralrecon.sorted.bam
+fasta:    parity/fixtures/artic_viralrecon/NC_045512.2.fa
+
+--- Timing ---
+gxy_real=0.66 gxy_user=0.61 gxy_sys=0.05 gxy_maxrss=169888
+Number of substitution tests performed: 46113
+Number of indel tests performed: 0
+upstream_real=23.28 upstream_user=22.71 upstream_sys=0.17 upstream_maxrss=14200
+
+--- Concordance (all calls) ---
+only in gxy:       80
+only in upstream:  172
+shared:            207
+jaccard:           0.4510
+
+--- AF-level diff on shared calls (|delta AF|) ---
+max=9.88e-01  mean=4.33e-02  (n=287)
