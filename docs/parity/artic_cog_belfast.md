@@ -54,8 +54,26 @@ Likely drivers of the gap (to triage when closing it):
    suggests a handful of low-AF / boundary-AF calls where the two tools
    disagree on the underlying count rather than the filter verdict.
 
-Next actions to bump toward 0.99:
+## Preprocessed run (ivar trim + lofreq indelqual --dindel)
 
-- Apply `lofreq indelqual --dindel` before `lofreq-gxy call`.
-- Apply `ivar trim` or similar primer-bed trimming (ARTIC V3 bed exists).
-- Re-run and see whether the residual gap matches the HG002 MT pattern.
+| Metric | Raw | Preprocessed |
+|---|---:|---:|
+| Jaccard (all AF) | 0.6207 | 0.6429 |
+| Jaccard at AF≥0.05 (ship-gate threshold) | 0.8889 | 0.8889 |
+| only gxy @ AF≥0.05 | 1 | 1 |
+| only upstream @ AF≥0.05 | 0 | 0 |
+
+See [`parity/compare/artic_cog_belfast_pp/report.txt`](../../parity/compare/artic_cog_belfast_pp/report.txt).
+
+Preprocessing barely moved the raw Jaccard (+0.022), and the AF≥0.05
+Jaccard was unchanged. The single remaining gxy-only call at AF≥0.05
+is at position 1606 with DP4=2,1,0,35 — 35 alt-reverse reads, 0
+alt-forward. Classic one-sided strand bias. Upstream rejects it via
+its FDR-corrected SB filter; gxy's default `sb_phred_max=100` lets it
+through because this sample's SB Phred on this call is below 100
+despite the extreme directional skew.
+
+**Finding**: the parity gap on ARTIC data at the ship-gate threshold
+is not primer noise or indel quality — it's that gxy's default SB
+threshold is less strict than upstream's FDR-corrected chain when the
+depths are in the ARTIC-Illumina range (100s-low-1000s per position).

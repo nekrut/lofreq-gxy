@@ -56,13 +56,26 @@ and tells us where the filter/trim gaps are.
 | [artic_viralrecon](artic_viralrecon.md) (nf-core test data) | 56 k | 287 | 207 | 80 | 172 | 0.4510 | 0.66 s | 23.3 s |
 | [artic_broad_harvard](artic_broad_harvard.md) (ENA PRJNA622837 / SRR17208115) | 402 k | 185 | 92 | 93 | 28 | 0.4319 | 19.1 s | 239.8 s |
 
-**Takeaway from the first Tier-2 runs:** on untreated real ARTIC data
-`lofreq-gxy` tracks upstream in timing (10–30× speedup) but the call
-sets diverge enough (Jaccard 0.43–0.62) that neither tool's output is
-close to ground truth without primer trimming + indelqual. Next pass
-will preprocess with `ivar trim` + `lofreq indelqual --dindel` and
-re-run — expected direction is both tools converging up together, as
-happened on HG002 MT (0.23 → 0.90).
+### Tier 2.1 — preprocessed (ivar trim V3 + lofreq indelqual --dindel)
+
+| Dataset | raw reads | Jaccard (all AF) | **Jaccard at AF≥0.05** (ship gate) | only gxy @ 0.05 | only up @ 0.05 |
+|---|--:|--:|--:|--:|--:|
+| artic_cog_belfast_pp | 95 k | 0.6429 | **0.8889** | 1 | 0 |
+| artic_viralrecon_pp | 56 k | 0.4506 | **0.4348** | 9 | 4 |
+| artic_broad_harvard_pp | 402 k | 0.4481 | **0.7037** | 8 | 0 |
+
+**Preprocessing barely moved anything.** The gap isn't primer noise or
+indel quality — it's a **strand-bias filter mismatch**. Every
+gxy-only call at AF≥0.05 has extreme one-sided DP4 (e.g.,
+`DP4=160,194,0,21` — all alt reads on the reverse strand). Upstream
+rejects these via its FDR-corrected Fisher SB filter; gxy's default
+`sb_phred_max=100` lets them through because the Phred value alone
+doesn't capture the bias at ARTIC depth ranges.
+
+Per-dataset details in `docs/parity/artic_*.md`. Next pass on main
+should consider either tightening the default `sb_phred_max` for
+ARTIC-scale data or switching to FDR-correction semantics on the
+strand-bias filter.
 
 ### Future Tier-2 datasets (not yet run)
 

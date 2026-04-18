@@ -42,10 +42,29 @@ probably a **filter-chain** difference rather than a base-count
 difference — mean \|ΔAF\| on the 207 shared calls is only 0.043, so
 when both tools call a site they agree closely on the AF.
 
-Next actions:
+## Preprocessed run (ivar trim + lofreq indelqual --dindel)
 
-- Check whether the 172 upstream-only calls are mostly indels (gxy
-  currently does SNVs only in this pipeline — `Number of indel tests
-  performed: 0`).
-- Same primer-trimming / indelqual preprocessing comparison as the
-  other Tier 2.1 datasets.
+| Metric | Raw | Preprocessed |
+|---|---:|---:|
+| Jaccard (all AF) | 0.4510 | 0.4506 |
+| Jaccard at AF≥0.05 | 0.4167 | 0.4348 |
+| only gxy @ AF≥0.05 | 10 | 9 |
+| only upstream @ AF≥0.05 | 4 | 4 |
+
+See [`parity/compare/artic_viralrecon_pp/report.txt`](../../parity/compare/artic_viralrecon_pp/report.txt).
+
+Preprocessing had essentially no effect. Looking at the actual
+disagreements:
+
+- All upstream-only and gxy-only calls are SNVs (no indel-handling gap).
+- Most gxy-only calls at AF≥0.05 have one-sided strand distributions
+  (e.g., position 9843: DP4=147,10,29,0 — 29 alt-forward, 0
+  alt-reverse, AF=0.156). Same strand-bias over-calling pattern seen
+  on the other Tier 2.1 datasets.
+- The 4 upstream-only calls at AF≥0.05 have balanced DP4
+  (e.g., 33,34,3,3) — upstream calls them, gxy misses. This is the
+  opposite asymmetry from the strand-bias cases, and it's rarer.
+
+**Finding**: same as artic_cog_belfast — gxy's default
+`sb_phred_max=100` is less strict than upstream's FDR chain at ARTIC
+depths.
