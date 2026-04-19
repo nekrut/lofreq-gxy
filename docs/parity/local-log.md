@@ -116,11 +116,36 @@ calls at AF≥0.05:
 Further convergence to 1.0 would require FDR-corrected SB on gxy
 (tracked as future work).
 
+### Tier 2.4 — E. coli K-12 MG1655 at 30×
+
+First non-SARS-CoV-2 dataset. MG1655 sequenced against its own
+reference (`NC_000913.3`) — ground-truth expectation is **no real
+low-AF variants**.
+
+| Metric | Value |
+|---|---:|
+| gxy calls | **0** |
+| upstream calls | 10 |
+| **Jaccard** | **0.0000** (but see below) |
+| gxy wall-clock | 9.8 s |
+| upstream wall-clock | 213.6 s (22× slower) |
+
+**Jaccard=0 is a filter-quality win for gxy**, not a regression. Every
+one of upstream's 10 calls is at AF 0.10–0.31 with `alt_fw=0` or
+`alt_rv=0` — 100 % one-sided strand distribution, the classic
+PCR/sequencing-artifact signature. PR #10's
+`max_alt_strand_ratio=0.99` correctly rejects every one.
+
+See [`ecoli_wgs_30x.md`](ecoli_wgs_30x.md) for positions + DP4 listing.
+A truth-based metric (precision / recall against a simulated truth
+VCF) would put gxy ahead on this dataset; a naive parity-to-upstream
+metric misrepresents the situation.
+
 ### Future Tier-2 datasets (not yet run)
 
 - 2.2 SARS-CoV-2 ARTIC deep (~5000×)
 - 2.3 SARS-CoV-2 synthetic lineage mixtures (absolute truth)
-- 2.4 / 2.5 E. coli K12 30× / 300×
+- 2.5 E. coli K12 at 300× (coverage scaling)
 - 2.6 M. tuberculosis (PE/PPE)
 - 2.7 C. auris
 - 2.8 Wastewater ultra-deep (>10 000×)
