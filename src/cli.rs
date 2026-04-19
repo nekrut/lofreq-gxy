@@ -219,6 +219,12 @@ pub struct CallArgs {
     #[arg(long = "no-default-filter", action = ArgAction::SetTrue)]
     pub no_default_filter: bool,
 
+    /// Reject if more than this fraction of alt reads are on one strand.
+    /// Default 0.99 (compound with SB Phred threshold). Set to 1.0 to
+    /// disable; the existing sb_phred_max rejector is unaffected.
+    #[arg(long = "max-alt-strand-ratio", value_name = "FLOAT", default_value_t = 0.99)]
+    pub max_alt_strand_ratio: f64,
+
     /// Overwrite existing output files rather than failing.
     #[arg(long = "force-overwrite", action = ArgAction::SetTrue)]
     pub force_overwrite: bool,
