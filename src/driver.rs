@@ -158,7 +158,14 @@ pub fn run(args: &CallArgs) -> Result<usize, DriverError> {
                     dp4.alt_rev as u64,
                 );
                 if let Some(f) = default_filter.as_ref() {
-                    if !f.passes(call.depth, call.allele_freq, sb, call.raw_pvalue) {
+                    if !f.passes(
+                        call.depth,
+                        call.allele_freq,
+                        sb,
+                        call.raw_pvalue,
+                        dp4.alt_fwd,
+                        dp4.alt_rev,
+                    ) {
                         continue;
                     }
                 }
