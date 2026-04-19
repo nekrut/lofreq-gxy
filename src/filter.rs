@@ -123,6 +123,12 @@ pub struct DefaultFilter {
     /// Reject if the raw-p-value Phred is below this. Default 0.0 (off
     /// — the caller already applied sig/bonf, so this is belt-and-braces).
     pub min_qual_phred: f64,
+    /// Reject if more than this fraction of alt reads are on one strand
+    /// (compound with `sb_phred_max`). Upstream's `lofreq filter` uses
+    /// 0.85 as the compound-check cutoff; we default to 0.99 because the
+    /// HG002 MT germline goes as high as 0.874 (pos 8557) and we don't
+    /// want to drop those. Set to 1.0 to disable.
+    pub max_alt_strand_ratio: f64,
 }
 
 impl Default for DefaultFilter {
@@ -140,6 +146,7 @@ impl Default for DefaultFilter {
             min_cov: 10,
             min_af: 0.0,
             min_qual_phred: 0.0,
+            max_alt_strand_ratio: 0.99,
         }
     }
 }
