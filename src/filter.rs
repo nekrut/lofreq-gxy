@@ -110,9 +110,10 @@ pub fn fisher_two_tailed(a: u64, b: u64, c: u64, d: u64) -> f64 {
 /// exact byte parity isn't guaranteed at the boundary.
 #[derive(Debug, Clone, Copy)]
 pub struct DefaultFilter {
-    /// Reject if the variant's SB Phred exceeds this (upstream uses FDR
-    /// on the Fisher p-value; 60 Phred ≈ Fisher p ≤ 1e-6, which is the
-    /// equivalent cutoff on a single-test basis).
+    /// Reject if the variant's SB Phred exceeds this. Default 120,
+    /// raised from 100 when the proper-pair filter became default
+    /// (HG002 MT:310 shifts to SB=111 under that filter; see spec
+    /// 2026-04-19-proper-pair-filter-design.md).
     pub sb_phred_max: u32,
     /// Reject if the column depth is below this. Default 10, matching
     /// the heuristic upstream uses.
@@ -133,16 +134,15 @@ pub struct DefaultFilter {
 
 impl Default for DefaultFilter {
     fn default() -> Self {
-        // `sb_phred_max = 100` was chosen empirically against real HG002 MT
-        // at 15 000× depth: at very high coverage, Fisher SB routinely
-        // flags legitimate germline variants (e.g. HG002 MT:310 at 91 %
-        // AF hits SB≈83, MT:456 at 99 % AF hits SB≈69) even though those
-        // calls pass upstream's FDR-corrected SB filter. A hard cut at
-        // SB > 100 drops the extreme-bias false positives (which cluster
-        // at SB ≥ 200 in the D-loop region) without losing the germline
-        // calls. See docs/parity/hg002_mt.md for the distribution.
+        // `sb_phred_max = 120` covers the HG002 MT:310 germline at
+        // SB Phred 111 (after proper-pair filtering — see spec
+        // 2026-04-19-proper-pair-filter-design.md). ARTIC over-calls
+        // from PR #10 all sit at SB ≤ 92, so this threshold still
+        // rejects them. Upstream's default is FDR-corrected alpha=0.001
+        // rather than a hard Phred cap; our 120 is a conservative
+        // approximation that avoids the buffering/MTC refactor.
         Self {
-            sb_phred_max: 100,
+            sb_phred_max: 120,
             min_cov: 10,
             min_af: 0.0,
             min_qual_phred: 0.0,
@@ -325,12 +325,12 @@ mod tests {
     #[test]
     fn default_filter_rejects_extreme_sb() {
         let f = DefaultFilter::default();
-        // Default max is 100; 250 (extreme bias) rejects, 50 passes.
+        // Default max is 120; 250 (extreme bias) rejects, 50 passes.
         assert!(!f.passes(100, 0.5, 250, 1e-10, 10, 10));
         assert!(f.passes(100, 0.5, 50, 1e-10, 10, 10));
-        // Right at the boundary: 100 passes, 101 rejects.
-        assert!(f.passes(100, 0.5, 100, 1e-10, 10, 10));
-        assert!(!f.passes(100, 0.5, 101, 1e-10, 10, 10));
+        // Right at the boundary: 120 passes, 121 rejects.
+        assert!(f.passes(100, 0.5, 120, 1e-10, 10, 10));
+        assert!(!f.passes(100, 0.5, 121, 1e-10, 10, 10));
     }
 
     #[test]
@@ -415,5 +415,12 @@ mod tests {
             ..Default::default()
         };
         assert!(f.passes(500, 0.1, 0, 1e-10, 50, 0));
+    }
+
+    #[test]
+    fn default_filter_sb_phred_max_is_120() {
+        // Sentinel: if someone changes the default without updating the
+        // docs or regression baselines, this catches it.
+        assert_eq!(DefaultFilter::default().sb_phred_max, 120);
     }
 }
