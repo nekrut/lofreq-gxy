@@ -207,7 +207,9 @@ pub struct CallArgs {
     #[arg(long = "illumina-1.3", action = ArgAction::SetTrue)]
     pub illumina_13: bool,
 
-    /// Count anomalous read pairs (orphan mates).
+    /// Count anomalous read pairs (pairs lacking the PROPERLY_SEGMENTED
+    /// flag). Default behaviour drops these — matches upstream's
+    /// `--use-orphan` and `samtools mpileup` default.
     #[arg(long = "use-orphan", action = ArgAction::SetTrue)]
     pub use_orphan: bool,
 
