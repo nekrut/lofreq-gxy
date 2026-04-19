@@ -405,4 +405,15 @@ mod tests {
         let f = DefaultFilter::default();
         assert!(f.passes(100, 0.0, 0, 1e-10, 0, 0));
     }
+
+    #[test]
+    fn default_filter_ratio_disable_at_1_0() {
+        // `--max-alt-strand-ratio 1.0` must disable the check: a fully
+        // one-sided (50, 0) alt split should then pass.
+        let f = DefaultFilter {
+            max_alt_strand_ratio: 1.0,
+            ..Default::default()
+        };
+        assert!(f.passes(500, 0.1, 0, 1e-10, 50, 0));
+    }
 }
