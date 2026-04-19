@@ -3,16 +3,16 @@ bam:      parity/fixtures/artic_broad_harvard/artic_broad_harvard.trim.iq.sorted
 fasta:    parity/fixtures/artic_broad_harvard/NC_045512.2.fa
 
 --- Timing ---
-gxy_real=18.21 gxy_user=17.85 gxy_sys=0.35 gxy_maxrss=998588
+gxy_real=18.17 gxy_user=17.82 gxy_sys=0.35 gxy_maxrss=998380
 Number of substitution tests performed: 34452
 Number of indel tests performed: 0
-upstream_real=291.24 upstream_user=290.56 upstream_sys=0.61 upstream_maxrss=213328
+upstream_real=287.64 upstream_user=287.13 upstream_sys=0.45 upstream_maxrss=213736
 
 --- Concordance (all calls) ---
-only in gxy:       91
-only in upstream:  26
-shared:            95
-jaccard:           0.4481
+only in gxy:       62
+only in upstream:  44
+shared:            77
+jaccard:           0.4208
 
 --- AF-level diff on shared calls (|delta AF|) ---
-max=1.00e+00  mean=1.77e-01  (n=186)
+max=1.00e+00  mean=1.85e-01  (n=139)

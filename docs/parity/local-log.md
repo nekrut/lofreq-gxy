@@ -77,6 +77,22 @@ should consider either tightening the default `sb_phred_max` for
 ARTIC-scale data or switching to FDR-correction semantics on the
 strand-bias filter.
 
+### Tier 2.1 — post-SB-fix rerun (PR #10 merged)
+
+PR #10 landed the `max_alt_strand_ratio` compound check (default 0.99).
+Rerunning the same three preprocessed BAMs with the merged filter:
+
+| Dataset | Jaccard (all AF) | **Jaccard at AF≥0.05** | only gxy @ 0.05 | only up @ 0.05 | Δ vs pre-fix |
+|---|--:|--:|--:|--:|--|
+| artic_cog_belfast_pp | 0.6667 | **1.0000** ✓ | 0 | 0 | 0.89 → 1.00 |
+| artic_viralrecon_pp | 0.4276 | **0.4737** | 5 | 5 | 0.43 → 0.47 |
+| artic_broad_harvard_pp | 0.4208 | **0.8500** | 1 | 2 | 0.70 → 0.85 |
+
+`cog_belfast` now clears the Tier-2 ship gate (Jaccard 1.00 at AF≥0.05).
+`broad_harvard` substantially improved. `viralrecon`'s residual gap is
+unrelated to SB — gxy *misses* low-AF balanced-DP4 calls upstream makes
+— tracked separately.
+
 ### Future Tier-2 datasets (not yet run)
 
 - 2.2 SARS-CoV-2 ARTIC deep (~5000×)

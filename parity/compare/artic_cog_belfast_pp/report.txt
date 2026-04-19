@@ -3,16 +3,16 @@ bam:      parity/fixtures/artic_cog_belfast/artic_cog_belfast.trim.iq.sorted.bam
 fasta:    parity/fixtures/artic_cog_belfast/NC_045512.2.fa
 
 --- Timing ---
-gxy_real=0.82 gxy_user=0.74 gxy_sys=0.08 gxy_maxrss=260008
+gxy_real=0.80 gxy_user=0.71 gxy_sys=0.08 gxy_maxrss=259684
 Number of substitution tests performed: 25536
 Number of indel tests performed: 0
-upstream_real=38.06 upstream_user=37.99 upstream_sys=0.05 upstream_maxrss=8552
+upstream_real=37.86 upstream_user=37.80 upstream_sys=0.06 upstream_maxrss=8608
 
 --- Concordance (all calls) ---
-only in gxy:       7
-only in upstream:  3
-shared:            18
-jaccard:           0.6429
+only in gxy:       3
+only in upstream:  5
+shared:            16
+jaccard:           0.6667
 
 --- AF-level diff on shared calls (|delta AF|) ---
-max=9.96e-01  mean=2.85e-01  (n=25)
+max=9.94e-01  mean=3.12e-01  (n=19)
