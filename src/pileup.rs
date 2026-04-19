@@ -347,6 +347,16 @@ impl Default for BamReadFilter {
     }
 }
 
+impl BamReadFilter {
+    /// Return `true` if the read should be dropped purely on the
+    /// anomalous-pair rule. Callers remain responsible for the other
+    /// rejections (unmapped, dup, qc_fail, …). Extracted for unit
+    /// testing — see `record_to_aligned_read` for how it's applied.
+    pub fn drop_as_anomalous_pair(&self, paired: bool, proper_pair: bool) -> bool {
+        !self.use_orphan && paired && !proper_pair
+    }
+}
+
 /// Turn one `noodles_bam::Record` into our BAM-agnostic [`AlignedRead`].
 ///
 /// Returns `Ok(None)` for records that are unmapped, secondary, or
@@ -382,12 +392,10 @@ pub fn record_to_aligned_read(
     // PROPERLY_SEGMENTED, drop it. Covers the older mate-unmapped
     // and mate-on-different-chrom cases (both imply the aligner
     // won't set 0x2). Single-end reads are unaffected.
-    if !filter.use_orphan {
-        let paired = (bits & Flags::SEGMENTED.bits()) != 0;
-        let proper = (bits & Flags::PROPERLY_SEGMENTED.bits()) != 0;
-        if paired && !proper {
-            return Ok(None);
-        }
+    let paired = (bits & Flags::SEGMENTED.bits()) != 0;
+    let proper = (bits & Flags::PROPERLY_SEGMENTED.bits()) != 0;
+    if filter.drop_as_anomalous_pair(paired, proper) {
+        return Ok(None);
     }
 
     let ref_start = match record.alignment_start() {
@@ -606,5 +614,38 @@ mod tests {
             let sum: u32 = col.allele_depths().iter().sum();
             assert_eq!(sum, col.depth());
         }
+    }
+
+    #[test]
+    fn proper_pair_filter_drops_improper_paired() {
+        // paired=true, proper_pair=false → drop at default.
+        let f = BamReadFilter::default();
+        assert!(f.drop_as_anomalous_pair(true, false));
+    }
+
+    #[test]
+    fn proper_pair_filter_keeps_improper_with_use_orphan() {
+        // paired=true, proper_pair=false, but use_orphan=true → keep.
+        let f = BamReadFilter { use_orphan: true };
+        assert!(!f.drop_as_anomalous_pair(true, false));
+    }
+
+    #[test]
+    fn proper_pair_filter_keeps_single_end() {
+        // paired=false → never considered anomalous; kept either way.
+        let default = BamReadFilter::default();
+        let orphan_on = BamReadFilter { use_orphan: true };
+        assert!(!default.drop_as_anomalous_pair(false, false));
+        assert!(!orphan_on.drop_as_anomalous_pair(false, false));
+        // Even if proper_pair happens to be set on a non-paired read,
+        // we still keep it (degenerate flag combination).
+        assert!(!default.drop_as_anomalous_pair(false, true));
+    }
+
+    #[test]
+    fn proper_pair_filter_keeps_proper_paired() {
+        // The normal case: paired AND proper → keep.
+        let f = BamReadFilter::default();
+        assert!(!f.drop_as_anomalous_pair(true, true));
     }
 }
