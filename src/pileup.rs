@@ -329,11 +329,14 @@ fn cigar_kind_to_op(kind: noodles_sam::alignment::record::cigar::op::Kind) -> Ci
 /// alignments get excluded at load time.
 #[derive(Debug, Clone, Copy)]
 pub struct BamReadFilter {
-    /// Keep "orphan" reads — paired reads whose mate is unmapped or
-    /// mapped to a different reference sequence. Upstream `lofreq call`
-    /// drops these by default; keeping them inflates depth and can cause
-    /// false-positive low-AF calls in repetitive regions (see
-    /// docs/parity/hg002_mt.md).
+    /// Keep reads that upstream `lofreq call` treats as "anomalous"
+    /// — paired reads whose PROPERLY_SEGMENTED flag is unset (aligner
+    /// didn't mark the pair as "properly paired"). Typical of
+    /// ARTIC-amplicon libraries where insert sizes fall outside the
+    /// aligner's expected range. Dropping these by default matches
+    /// upstream's filter and `samtools mpileup`'s default. Keeping
+    /// them (by passing `--use-orphan`) can inflate depth and cause
+    /// false-positive low-AF calls.
     pub use_orphan: bool,
 }
 
@@ -374,20 +377,16 @@ pub fn record_to_aligned_read(
         None => return Ok(None),
     };
 
-    // Orphan check: paired read whose mate is unmapped, or mapped to a
-    // different reference. Upstream's default. `--use-orphan` keeps them.
+    // Anomalous-pair filter (upstream's `--use-orphan` semantics):
+    // if the read is paired but the aligner didn't mark the pair
+    // PROPERLY_SEGMENTED, drop it. Covers the older mate-unmapped
+    // and mate-on-different-chrom cases (both imply the aligner
+    // won't set 0x2). Single-end reads are unaffected.
     if !filter.use_orphan {
         let paired = (bits & Flags::SEGMENTED.bits()) != 0;
-        if paired {
-            let mate_unmapped = (bits & Flags::MATE_UNMAPPED.bits()) != 0;
-            if mate_unmapped {
-                return Ok(None);
-            }
-            if let Some(Ok(mate_id)) = record.mate_reference_sequence_id() {
-                if mate_id != chrom_id {
-                    return Ok(None);
-                }
-            }
+        let proper = (bits & Flags::PROPERLY_SEGMENTED.bits()) != 0;
+        if paired && !proper {
+            return Ok(None);
         }
     }
 
