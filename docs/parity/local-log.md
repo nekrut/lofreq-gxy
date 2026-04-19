@@ -93,6 +93,29 @@ Rerunning the same three preprocessed BAMs with the merged filter:
 unrelated to SB — gxy *misses* low-AF balanced-DP4 calls upstream makes
 — tracked separately.
 
+### Tier 2.1 — post-proper-pair-fix rerun (PR #11 merged)
+
+PR #11 landed the `--use-orphan` broadening (default-drop paired-but-not-proper
+reads) and bumped `sb_phred_max` 100 → 120. Rerunning the same three
+preprocessed BAMs:
+
+| Dataset | Jaccard (all AF) | **Jaccard at AF≥0.05** | only gxy @ 0.05 | only up @ 0.05 | Δ vs pre-fix |
+|---|--:|--:|--:|--:|--|
+| artic_cog_belfast_pp | 0.6667 | **1.0000** ✓ | 0 | 0 | 1.00 → 1.00 (preserved) |
+| artic_viralrecon_pp | 0.7327 | **0.8667** | 1 | 1 | 0.47 → **0.87** (+0.39) |
+| artic_broad_harvard_pp | 0.4051 | **0.8500** | 1 | 2 | 0.85 → 0.85 (preserved) |
+
+`viralrecon` jumped from 0.47 → 0.87 — the big win. Two residual
+calls at AF≥0.05:
+- **gxy-only at pos 8413** (AF=0.077, DP4=24,24,2,2): balanced low-AF
+  call gxy makes, upstream misses. gxy being more sensitive here.
+- **upstream-only at pos 23789** (AF=0.125, DP4=2,38,0,6): fully
+  one-sided alt (ratio=1.0). Correctly rejected by PR #10's
+  `max_alt_strand_ratio=0.99` filter — by design.
+
+Further convergence to 1.0 would require FDR-corrected SB on gxy
+(tracked as future work).
+
 ### Future Tier-2 datasets (not yet run)
 
 - 2.2 SARS-CoV-2 ARTIC deep (~5000×)
