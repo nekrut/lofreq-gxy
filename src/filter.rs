@@ -123,6 +123,12 @@ pub struct DefaultFilter {
     /// Reject if the raw-p-value Phred is below this. Default 0.0 (off
     /// — the caller already applied sig/bonf, so this is belt-and-braces).
     pub min_qual_phred: f64,
+    /// Reject if more than this fraction of alt reads are on one strand
+    /// (compound with `sb_phred_max`). Upstream's `lofreq filter` uses
+    /// 0.85 as the compound-check cutoff; we default to 0.99 because the
+    /// HG002 MT germline goes as high as 0.874 (pos 8557) and we don't
+    /// want to drop those. Set to 1.0 to disable.
+    pub max_alt_strand_ratio: f64,
 }
 
 impl Default for DefaultFilter {
@@ -140,13 +146,22 @@ impl Default for DefaultFilter {
             min_cov: 10,
             min_af: 0.0,
             min_qual_phred: 0.0,
+            max_alt_strand_ratio: 0.99,
         }
     }
 }
 
 impl DefaultFilter {
     /// True if the call clears every threshold.
-    pub fn passes(&self, depth: u32, af: f64, sb_phred: u32, raw_pvalue: f64) -> bool {
+    pub fn passes(
+        &self,
+        depth: u32,
+        af: f64,
+        sb_phred: u32,
+        raw_pvalue: f64,
+        alt_fw: u32,
+        alt_rv: u32,
+    ) -> bool {
         if depth < self.min_cov {
             return false;
         }
@@ -155,6 +170,13 @@ impl DefaultFilter {
         }
         if sb_phred > self.sb_phred_max {
             return false;
+        }
+        let alt_total = alt_fw + alt_rv;
+        if alt_total > 0 {
+            let ratio = alt_fw.max(alt_rv) as f64 / alt_total as f64;
+            if ratio > self.max_alt_strand_ratio {
+                return false;
+            }
         }
         if self.min_qual_phred > 0.0 {
             let q = if raw_pvalue > 0.0 {
@@ -296,19 +318,19 @@ mod tests {
     #[test]
     fn default_filter_rejects_low_depth() {
         let f = DefaultFilter::default();
-        assert!(!f.passes(5, 0.5, 0, 1e-10));
-        assert!(f.passes(100, 0.5, 0, 1e-10));
+        assert!(!f.passes(5, 0.5, 0, 1e-10, 10, 10));
+        assert!(f.passes(100, 0.5, 0, 1e-10, 10, 10));
     }
 
     #[test]
     fn default_filter_rejects_extreme_sb() {
         let f = DefaultFilter::default();
         // Default max is 100; 250 (extreme bias) rejects, 50 passes.
-        assert!(!f.passes(100, 0.5, 250, 1e-10));
-        assert!(f.passes(100, 0.5, 50, 1e-10));
+        assert!(!f.passes(100, 0.5, 250, 1e-10, 10, 10));
+        assert!(f.passes(100, 0.5, 50, 1e-10, 10, 10));
         // Right at the boundary: 100 passes, 101 rejects.
-        assert!(f.passes(100, 0.5, 100, 1e-10));
-        assert!(!f.passes(100, 0.5, 101, 1e-10));
+        assert!(f.passes(100, 0.5, 100, 1e-10, 10, 10));
+        assert!(!f.passes(100, 0.5, 101, 1e-10, 10, 10));
     }
 
     #[test]
@@ -317,15 +339,15 @@ mod tests {
             min_af: 0.05,
             ..Default::default()
         };
-        assert!(!f.passes(100, 0.01, 0, 1e-10));
-        assert!(f.passes(100, 0.1, 0, 1e-10));
+        assert!(!f.passes(100, 0.01, 0, 1e-10, 10, 10));
+        assert!(f.passes(100, 0.1, 0, 1e-10, 10, 10));
     }
 
     #[test]
     fn default_filter_qual_gate_off_by_default() {
         let f = DefaultFilter::default();
         // Even tiny QUAL passes when min_qual_phred=0.
-        assert!(f.passes(100, 0.5, 0, 0.9));
+        assert!(f.passes(100, 0.5, 0, 0.9, 10, 10));
     }
 
     #[test]
@@ -335,8 +357,63 @@ mod tests {
             ..Default::default()
         };
         // p=1e-2 → Phred 20, below 30 → reject.
-        assert!(!f.passes(100, 0.5, 0, 1e-2));
+        assert!(!f.passes(100, 0.5, 0, 1e-2, 10, 10));
         // p=1e-4 → Phred 40, above 30 → pass.
-        assert!(f.passes(100, 0.5, 0, 1e-4));
+        assert!(f.passes(100, 0.5, 0, 1e-4, 10, 10));
+    }
+
+    #[test]
+    fn default_filter_rejects_fully_one_sided_alt() {
+        let f = DefaultFilter::default();
+        // Classic ARTIC FP shape: all alt reads on one strand.
+        // alt_fw=0, alt_rv=50 → ratio 1.0 > 0.99 → reject.
+        assert!(!f.passes(500, 0.1, 0, 1e-10, 0, 50));
+        // Mirror: alt_fw=18, alt_rv=0.
+        assert!(!f.passes(500, 0.1, 0, 1e-10, 18, 0));
+    }
+
+    #[test]
+    fn default_filter_keeps_mt8557_style() {
+        // HG002 MT:8557 germline: alt_fw=11612, alt_rv=1677 →
+        // ratio = 11612 / 13289 ≈ 0.874 < 0.99 → pass.
+        let f = DefaultFilter::default();
+        assert!(f.passes(15_000, 0.73, 83, 1e-10, 11612, 1677));
+    }
+
+    #[test]
+    fn default_filter_keeps_balanced_alt() {
+        let f = DefaultFilter::default();
+        // alt_fw=20, alt_rv=20 → ratio = 0.5 → pass.
+        assert!(f.passes(100, 0.4, 0, 1e-10, 20, 20));
+    }
+
+    #[test]
+    fn default_filter_boundary_at_ratio() {
+        let f = DefaultFilter::default();
+        // ratio = 99 / 100 = 0.99 exactly → pass (strict > compare).
+        assert!(f.passes(500, 0.2, 0, 1e-10, 99, 1));
+        assert!(f.passes(500, 0.2, 0, 1e-10, 1, 99));
+        // ratio = 100 / 101 ≈ 0.9901 > 0.99 → reject.
+        assert!(!f.passes(500, 0.2, 0, 1e-10, 100, 1));
+        assert!(!f.passes(500, 0.2, 0, 1e-10, 1, 100));
+    }
+
+    #[test]
+    fn default_filter_handles_zero_alt_total() {
+        // Degenerate: alt_fw = alt_rv = 0. Don't divide by zero;
+        // treat as passing this check (other criteria will drop it).
+        let f = DefaultFilter::default();
+        assert!(f.passes(100, 0.0, 0, 1e-10, 0, 0));
+    }
+
+    #[test]
+    fn default_filter_ratio_disable_at_1_0() {
+        // `--max-alt-strand-ratio 1.0` must disable the check: a fully
+        // one-sided (50, 0) alt split should then pass.
+        let f = DefaultFilter {
+            max_alt_strand_ratio: 1.0,
+            ..Default::default()
+        };
+        assert!(f.passes(500, 0.1, 0, 1e-10, 50, 0));
     }
 }

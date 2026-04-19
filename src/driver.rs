@@ -103,7 +103,10 @@ pub fn run(args: &CallArgs) -> Result<usize, DriverError> {
     let default_filter: Option<DefaultFilter> = if args.no_default_filter {
         None
     } else {
-        Some(DefaultFilter::default())
+        Some(DefaultFilter {
+            max_alt_strand_ratio: args.max_alt_strand_ratio,
+            ..DefaultFilter::default()
+        })
     };
 
     // Group reads by chromosome so each chrom's pileup only scans its own
@@ -158,7 +161,14 @@ pub fn run(args: &CallArgs) -> Result<usize, DriverError> {
                     dp4.alt_rev as u64,
                 );
                 if let Some(f) = default_filter.as_ref() {
-                    if !f.passes(call.depth, call.allele_freq, sb, call.raw_pvalue) {
+                    if !f.passes(
+                        call.depth,
+                        call.allele_freq,
+                        sb,
+                        call.raw_pvalue,
+                        dp4.alt_fwd,
+                        dp4.alt_rev,
+                    ) {
                         continue;
                     }
                 }
@@ -309,6 +319,7 @@ mod tests {
             use_orphan: false,
             plp_summary_only: false,
             no_default_filter: false,
+            max_alt_strand_ratio: 0.99,
             force_overwrite: false,
             verbose: false,
             debug: false,
