@@ -141,10 +141,34 @@ A truth-based metric (precision / recall against a simulated truth
 VCF) would put gxy ahead on this dataset; a naive parity-to-upstream
 metric misrepresents the situation.
 
+### Tier 2.3 — Lineage-mixture benchmark (absolute truth)
+
+Injected the 18 Alpha-B.1.1.7 signature SNVs into synthetic reads at
+six mixture fractions (0.01, 0.025, 0.05, 0.10, 0.25, 0.50) via
+`scripts/lineage-mixture-benchmark.sh`. This is precision / recall
+against known truth — the metric the E. coli result showed we need.
+
+| AF | Precision (gxy = up) | Recall (gxy = up) | mean \|ΔAF\| |
+|---:|---:|---:|---:|
+| 0.010 | 1.0000 | 0.5556 | 0.0033 |
+| 0.025 | 1.0000 | **1.0000** | 0.0045 |
+| 0.050 | 1.0000 | **1.0000** | 0.0083 |
+| 0.100 | 1.0000 | **1.0000** | 0.0078 |
+| 0.250 | 1.0000 | 1.0000 | 0.0105 |
+| 0.500 | 1.0000 | 1.0000 | 0.0104 |
+
+**gxy and upstream are bit-identical** (same TP/FP/FN counts at every
+AF). Perfect precision everywhere; perfect recall at AF ≥ 0.025.
+At AF = 0.01, both tools miss the same 8 of 18 — the Bonferroni
+statistical limit at 1000×, not an implementation gap.
+
+See [`lineage_mixture.md`](lineage_mixture.md) for the full table +
+methodology (TEST-PLAN's external DOI was broken; this is a
+self-contained synthetic alternative).
+
 ### Future Tier-2 datasets (not yet run)
 
 - 2.2 SARS-CoV-2 ARTIC deep (~5000×)
-- 2.3 SARS-CoV-2 synthetic lineage mixtures (absolute truth)
 - 2.5 E. coli K12 at 300× (coverage scaling)
 - 2.6 M. tuberculosis (PE/PPE)
 - 2.7 C. auris

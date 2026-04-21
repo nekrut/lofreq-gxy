@@ -36,3 +36,10 @@ Cargo.lock.bak
 /parity/compare/**/*.time.log
 /parity/compare/**/isec_*/
 /parity/compare/**/isec/
+/parity/compare/**/*_isec/
+# Lineage-mixture benchmark synthesises fixtures alongside outputs.
+/parity/compare/**/*.bam
+/parity/compare/**/*.bam.bai
+/parity/compare/**/truth.vcf
+/parity/compare/**/truth.vcf.gz
+/parity/compare/**/truth.vcf.gz.tbi
