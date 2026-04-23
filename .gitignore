@@ -18,6 +18,14 @@ Cargo.lock.bak
 /parity/fixtures/**/*.vcf
 /parity/fixtures/**/*.vcf.gz
 /parity/fixtures/**/*.vcf.gz.tbi
+# Intermediate BWA index + raw reads for Tier 2 ARTIC fetches.
+/parity/fixtures/**/*.fastq.gz
+/parity/fixtures/**/*.bwt
+/parity/fixtures/**/*.pac
+/parity/fixtures/**/*.ann
+/parity/fixtures/**/*.amb
+/parity/fixtures/**/*.sa
+/parity/fixtures/**/bwa.log
 # Comparison outputs — only report.txt is committed.
 /parity/compare/**/*.vcf
 /parity/compare/**/*.vcf.gz
@@ -28,3 +36,10 @@ Cargo.lock.bak
 /parity/compare/**/*.time.log
 /parity/compare/**/isec_*/
 /parity/compare/**/isec/
+/parity/compare/**/*_isec/
+# Lineage-mixture benchmark synthesises fixtures alongside outputs.
+/parity/compare/**/*.bam
+/parity/compare/**/*.bam.bai
+/parity/compare/**/truth.vcf
+/parity/compare/**/truth.vcf.gz
+/parity/compare/**/truth.vcf.gz.tbi
