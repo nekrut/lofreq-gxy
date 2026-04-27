@@ -22,6 +22,78 @@ $ lofreq-gxy call -f ref.fa -o sample.vcf sample.bam
 
 ---
 
+## Status snapshot (in-flight Tier-2 work)
+
+This section is the resume-point for the active testing campaign. It
+gets refreshed as PRs land. For static design docs see PLAN.md /
+TEST-PLAN.md.
+
+**Branches & PRs:**
+
+| PR | Branch | State | What |
+|---|---|---|---|
+| [#9](https://github.com/nekrut/lofreq-gxy/pull/9) | `local/tier2-testing-log` | open (rolling log) | Tier-2 parity runs done locally; commits accumulate, never merges |
+| [#10](https://github.com/nekrut/lofreq-gxy/pull/10) | `fix/sb-compound-filter` | merged | `max_alt_strand_ratio` compound check, default 0.99 |
+| [#11](https://github.com/nekrut/lofreq-gxy/pull/11) | `fix/proper-pair-filter` | merged | Anomalous-pair filter default-on; `sb_phred_max` 100 → 120 |
+
+**Tier-2 scoreboard** (full details on PR #9):
+
+| Tier | Dataset | Metric | Result |
+|---|---|---|---|
+| 0 | unit tests | pass | 90 |
+| 1.1 | synthetic SARS-CoV-2 × 4 depths | Jaccard | 1.0000 × 4 |
+| 1.2 | HG002 MT | Jaccard | 0.9048 |
+| 2.1 | artic_cog_belfast | Jaccard @ AF≥0.05 | **1.0000** ✓ |
+| 2.1 | artic_viralrecon | Jaccard @ AF≥0.05 | 0.8667 |
+| 2.1 | artic_broad_harvard | Jaccard @ AF≥0.05 | 0.8500 |
+| 2.3 | lineage mixture (synthetic, 6 AFs) | Precision / Recall | 1.00 / 1.00 at AF≥0.025 (gxy = upstream) |
+| 2.4 | E. coli K-12 MG1655 30× | filter quality | gxy rejects all 10 upstream artifacts (Jaccard=0 is a win) |
+
+**Untouched Tier-2 datasets:** 2.2 deep ARTIC ~5000×, 2.5 E. coli
+300×, 2.6 M. tuberculosis, 2.7 C. auris, 2.8 wastewater >10 000×.
+**Active suggestion at last hand-off:** Tier 2.8 (wastewater) — exercises
+the `u32` coverage counter under extreme depth.
+
+**Resuming on a fresh machine:**
+
+```bash
+# 1. Clone + fetch all branches
+git clone git@github.com:nekrut/lofreq-gxy.git
+cd lofreq-gxy
+git checkout local/tier2-testing-log    # the rolling-log branch
+
+# 2. Build
+cargo build --release
+
+# 3. Conda env (samtools/bcftools 1.10 — newer trips libcurl conflicts on this base)
+conda create -n lofreq-gxy-test --override-channels -c bioconda -c conda-forge \
+  -y --no-channel-priority samtools=1.10 bcftools=1.10 bwa minimap2 ivar seqtk
+
+# 4. Build upstream lofreq (one-time, ~5 min)
+scripts/build-upstream.sh
+# Build script exits non-zero on a Python-helpers step but the C binary is built;
+# copy it into place manually:
+cp parity/upstream/build/lofreq-2.1.5/src/lofreq/lofreq parity/upstream/bin/lofreq
+
+# 5. Re-fetch fixtures (gitignored, not in repo)
+scripts/fetch-hg002-mt.sh
+# ARTIC fixtures: rerun three fetch + preprocess pairs (see scripts/fetch-artic-illumina.sh)
+# E. coli + lineage mixtures: scripts/fetch-ecoli-wgs.sh / scripts/lineage-mixture-benchmark.sh
+
+# 6. Run any compare with:
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate lofreq-gxy-test
+export LD_LIBRARY_PATH="$(pwd)/parity/upstream/lib:${LD_LIBRARY_PATH:-}"
+scripts/compare.sh <bam> <fasta> <out_dir>
+```
+
+**Key files for context:**
+- [`docs/parity/local-log.md`](docs/parity/local-log.md) — the rolling Tier-2 log on PR #9
+- [`docs/specs/`](docs/specs/) — design specs for PRs #10 and #11
+- [`docs/plans/`](docs/plans/) — implementation plans for the same
+- Per-dataset notes: `docs/parity/{hg002_mt,artic_*,ecoli_wgs_30x,lineage_mixture}.md`
+
+---
+
 ## Why a rewrite?
 
 Upstream lofreq is a well-designed, well-cited caller. Three things
