@@ -3,10 +3,10 @@ bam:      parity/fixtures/hg002_mt/hg002_mt.bam
 fasta:    parity/fixtures/hg002_mt/chrM.fa
 
 --- Timing ---
-gxy_real=47.62 gxy_user=25.47 gxy_sys=1.62 gxy_maxrss=3554724
+gxy_real=22.58 gxy_user=21.61 gxy_sys=0.96 gxy_maxrss=3198328
 Number of substitution tests performed: 49674
 Number of indel tests performed: 0
-upstream_real=694.53 upstream_user=635.23 upstream_sys=11.99 upstream_maxrss=44408
+upstream_real=647.45 upstream_user=640.57 upstream_sys=6.72 upstream_maxrss=38972
 
 --- Concordance (all calls) ---
 only in gxy:       2

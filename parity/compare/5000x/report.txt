@@ -3,10 +3,10 @@ bam:      parity/fixtures/sars_cov_2.5000x.sorted.bam
 fasta:    parity/fixtures/sars_cov_2.fa
 
 --- Timing ---
-gxy_real=8.01 gxy_user=6.87 gxy_sys=0.73 gxy_maxrss=1606460
+gxy_real=4.51 gxy_user=4.00 gxy_sys=0.50 gxy_maxrss=1601108
 Number of substitution tests performed: 88881
 Number of indel tests performed: 0
-upstream_real=170.40 upstream_user=155.99 upstream_sys=4.27 upstream_maxrss=10760
+upstream_real=139.62 upstream_user=137.84 upstream_sys=1.74 upstream_maxrss=8800
 
 --- Concordance (all calls) ---
 only in gxy:       0
